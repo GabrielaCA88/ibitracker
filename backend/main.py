@@ -14,7 +14,7 @@ from yield_token_service import YieldTokenService
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
 
 # Initialize services
@@ -314,6 +314,16 @@ def export_to_excel(address: str):
         
     except Exception as e:
         return jsonify({"error": f"Error creating Excel file: {str(e)}"}), 500
+
+@app.route('/')
+def serve_frontend():
+    """Serve the main frontend page"""
+    return app.send_static_file('index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    """Serve static files"""
+    return app.send_static_file(path)
 
 def create_wallet_sheet(wb, token_balances):
     """Create Wallet sheet with token balances"""

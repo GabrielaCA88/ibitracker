@@ -1,9 +1,9 @@
 class IBITracker {
     constructor() {
-        // Use Railway backend URL for production, localhost for development
+        // Use relative URLs for API calls when served from same domain
         this.apiBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
             ? 'http://localhost:8001' 
-            : 'https://web-production-b5f5.up.railway.app';
+            : '';
         this.currentAddress = null;
         this.init();
     }
@@ -283,13 +283,13 @@ class IBITracker {
             const priceSource = this.getPriceSource(token);
             
             line.innerHTML = `
-                <div class="flex items-center space-x-3">
-                    <div class="token-icon flex items-center justify-center">
-                        ${iconUrl ? 
-                            `<img src="${iconUrl}" alt="${symbol}" class="w-6 h-6 rounded-full">` : 
-                            `<i class="fas fa-coins text-white text-sm"></i>`
-                        }
-                    </div>
+                    <div class="flex items-center space-x-3">
+                        <div class="token-icon flex items-center justify-center">
+                            ${iconUrl ? 
+                                `<img src="${iconUrl}" alt="${symbol}" class="w-6 h-6 rounded-full">` : 
+                                `<i class="fas fa-coins text-white text-sm"></i>`
+                            }
+                        </div>
                 </div>
                 <div class="text-left">
                     <div class="font-semibold text-gray-800">${name}</div>
@@ -298,17 +298,17 @@ class IBITracker {
                     <div class="font-semibold text-gray-800">${balance}</div>
                 </div>
                 <div class="text-center">
-                    ${price ? `
+                                ${price ? `
                         <div class="flex items-center justify-center space-x-1">
                             <span class="font-semibold text-gray-800">$${this.formatPrice(price)}</span>
                             <i class="fas fa-info-circle text-blue-500 cursor-help" 
-                               title="Price source: ${priceSource}"></i>
+                                           title="Price source: ${priceSource}"></i>
                         </div>
                     ` : '<div class="font-semibold text-gray-800">N/A</div>'}
-                </div>
+                    </div>
                 <div class="text-center">
                     <div class="font-semibold text-gray-800">
-                        ${usdValue > 0 ? `$${this.formatUSDValue(usdValue)}` : 'N/A'}
+                            ${usdValue > 0 ? `$${this.formatUSDValue(usdValue)}` : 'N/A'}
                     </div>
                 </div>
             `;
