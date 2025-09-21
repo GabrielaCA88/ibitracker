@@ -53,7 +53,11 @@ class TokenBalance:
 
 @app.route("/")
 def root():
-    return jsonify({"message": "IBI Tracker API", "version": "1.0.0"})
+    """Serve the main frontend page"""
+    try:
+        return app.send_static_file('index.html')
+    except Exception as e:
+        return f"Error serving frontend: {str(e)}", 500
 
 @app.route("/health")
 def health_check():
@@ -314,16 +318,6 @@ def export_to_excel(address: str):
         
     except Exception as e:
         return jsonify({"error": f"Error creating Excel file: {str(e)}"}), 500
-
-@app.route('/')
-def serve_frontend():
-    """Serve the main frontend page"""
-    return app.send_static_file('index.html')
-
-@app.route('/<path:path>')
-def serve_static(path):
-    """Serve static files"""
-    return app.send_static_file(path)
 
 def create_wallet_sheet(wb, token_balances):
     """Create Wallet sheet with token balances"""
