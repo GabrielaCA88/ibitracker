@@ -1,9 +1,9 @@
 class IBITracker {
     constructor() {
-        // Use deployed URL if available, otherwise fallback to localhost
+        // Use Railway backend URL for production, localhost for development
         this.apiBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
             ? 'http://localhost:8001' 
-            : window.location.origin;
+            : 'https://web-production-b5f5.up.railway.app';
         this.currentAddress = null;
         this.init();
     }
