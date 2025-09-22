@@ -3,13 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IBI Tracker - Token Balance Dashboard</title>
+    <title>Yield Tracker - Rootstock Portfolio Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        /* Rootstock Brand Colors */
+        :root {
+            --rootstock-white: #FAF9F5;
+            --rootstock-black: #000000;
+            --rootstock-orange: #FF9100;
+            --rootstock-green: #79C600;
+            --rootstock-pink: #FF71E1;
         }
+        
+        body {
+            background-color: var(--rootstock-white);
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, var(--rootstock-orange) 0%, var(--rootstock-pink) 100%);
+        }
+        
         .card-hover {
             transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
         }
@@ -17,23 +31,47 @@
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0,0,0,0.1);
         }
+        
         .token-icon {
             width: 32px;
             height: 32px;
             border-radius: 50%;
-            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(45deg, var(--rootstock-green) 0%, var(--rootstock-orange) 100%);
         }
+        
         .protocol-logo {
             width: 24px;
             height: 24px;
             border-radius: 50%;
             object-fit: contain;
-            background: white;
+            background: var(--rootstock-white);
             padding: 2px;
         }
         .protocol-logo[src$=".png"] {
             background: transparent;
             padding: 0;
+        }
+        
+        /* Update button colors to use Rootstock Orange */
+        .bg-blue-600 {
+            background-color: var(--rootstock-orange) !important;
+        }
+        .bg-blue-700:hover {
+            background-color: #e67e00 !important;
+        }
+        .bg-green-600 {
+            background-color: var(--rootstock-green) !important;
+        }
+        .bg-green-700:hover {
+            background-color: #6bb300 !important;
+        }
+        
+        /* Update text colors */
+        .text-blue-600 {
+            color: var(--rootstock-orange) !important;
+        }
+        .text-blue-500 {
+            color: var(--rootstock-orange) !important;
         }
     </style>
 </head>
