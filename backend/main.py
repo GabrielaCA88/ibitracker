@@ -219,12 +219,30 @@ def get_address_info(address: str):
                 "value": native_rbtc["balance"]
             }
             
-            # Find RBTC price from existing tokens to use for native rBTC
+            # Find RBTC or WRBTC price from existing tokens to use for native rBTC
             rbtc_price = None
             for balance in all_balances:
-                if balance["token"]["symbol"] == "RBTC":
+                if balance["token"]["symbol"] in ["RBTC", "WRBTC"]:
                     rbtc_price = balance["token"]["exchange_rate"]
                     break
+            
+            # If no RBTC/WRBTC price found in existing tokens, try to get WRBTC price from lending service
+            if not rbtc_price:
+                try:
+                    # Get lending data to extract WRBTC price
+                    lending_data = lending_service.get_lending_data_for_address(address)
+                    if lending_data and "protocols" in lending_data:
+                        for protocol_name, protocol_data in lending_data["protocols"].items():
+                            if "price" in protocol_data and "token_prices" in protocol_data["price"]:
+                                # Look for WRBTC price in token_prices
+                                for explorer_address, price_data in protocol_data["price"]["token_prices"].items():
+                                    if explorer_address.lower() == "0xb87cbf55c42989fc3456d4c499ad0bb602a6c1bd":  # LayerBank WRBTC
+                                        rbtc_price = price_data["price"]
+                                        break
+                                if rbtc_price:
+                                    break
+                except Exception as e:
+                    logger.warning(f"Could not fetch WRBTC price from lending service: {str(e)}")
             
             if rbtc_price:
                 native_token_data["token"]["exchange_rate"] = rbtc_price
