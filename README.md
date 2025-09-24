@@ -10,6 +10,9 @@ A comprehensive portfolio tracker for Rootstock blockchain addresses, featuring 
 - **Merkle Rewards**: Track claimable rewards from Merkl protocol
 - **Excel Export**: Download comprehensive portfolio data as Excel spreadsheets
 
+Warning: Prices are extracted from APIs, not market data therefore its update make take some time. Not financial advice. 
+
 ## Deployment
 
 This application is configured for deployment on Railway with automatic port detection and production-ready settings.
+

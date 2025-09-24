@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from nft_service import NFTService
 from merkle_rewards_service import MerkleRewardsService
 from yield_token_service import YieldTokenService
+from lending_service import LendingService
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ CORS(app)
 nft_service = NFTService()
 merkle_service = MerkleRewardsService()
 yield_service = YieldTokenService()
+lending_service = LendingService()
 
 # Rootstock APIs
 ROOTSTOCK_API_BASE = "https://rootstock.blockscout.com/api/v2"
@@ -261,6 +263,23 @@ def get_yield_tokens(address: str):
         return jsonify(yield_data)
     except Exception as e:
         return jsonify({"error": f"Error fetching yield tokens: {str(e)}"}), 500
+
+@app.route("/api/lending-data/<address>")
+def get_lending_data(address: str):
+    """
+    Get lending protocol data (APR and prices) for an address
+    """
+    try:
+        # Get lending data directly from the service (it will handle campaign ID extraction)
+        lending_data = lending_service.get_lending_data_for_address(address)
+        
+        return jsonify({
+            "address": address,
+            "lending_data": lending_data
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Error fetching lending data: {str(e)}"}), 500
 
 @app.route("/api/export-excel/<address>")
 def export_to_excel(address: str):

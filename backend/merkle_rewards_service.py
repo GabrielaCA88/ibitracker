@@ -176,6 +176,7 @@ class MerkleRewardsService:
         """
         try:
             rewards = self.get_user_rewards(address)
+            campaign_ids = self._extract_campaign_ids(address)
             
             if not rewards:
                 logger.info(f"No Merkle rewards found for address: {address}")
@@ -184,7 +185,8 @@ class MerkleRewardsService:
                     "rewards": [],
                     "total_rewards": 0,
                     "total_usd_value": 0,
-                    "total_usd_value_formatted": "$0.00"
+                    "total_usd_value_formatted": "$0.00",
+                    "campaign_ids": campaign_ids
                 }
             
             # Calculate totals
@@ -195,7 +197,8 @@ class MerkleRewardsService:
                 "rewards": rewards,
                 "total_rewards": len(rewards),
                 "total_usd_value": total_usd_value,
-                "total_usd_value_formatted": f"${self._format_usd_value(total_usd_value)}"
+                "total_usd_value_formatted": f"${self._format_usd_value(total_usd_value)}",
+                "campaign_ids": campaign_ids
             }
             
             logger.info(f"Found {len(rewards)} rewards totaling {summary['total_usd_value_formatted']}")
@@ -208,8 +211,60 @@ class MerkleRewardsService:
                 "rewards": [],
                 "total_rewards": 0,
                 "total_usd_value": 0,
-                "total_usd_value_formatted": "$0.00"
+                "total_usd_value_formatted": "$0.00",
+                "campaign_ids": []
             }
+
+    def _extract_campaign_ids(self, address: str) -> List[str]:
+        """
+        Extract campaign IDs from Merkle API breakdowns section
+        
+        Args:
+            address: Wallet address to fetch campaign IDs for
+            
+        Returns:
+            List of campaign IDs found in the breakdowns
+        """
+        try:
+            lowercase_address = address.lower()
+            url = f"{self.merkle_api_base}/users/{lowercase_address}/rewards"
+            
+            params = {
+                "chainId": self.rootstock_chain_id,
+                "test": "false",
+                "claimableOnly": "true",
+                "breakdownPage": "0"
+            }
+            
+            logger.info(f"Extracting campaign IDs for address: {lowercase_address}")
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch campaign IDs: {response.status_code} - {response.text}")
+                return []
+            
+            data = response.json()
+            campaign_ids = set()  # Use set to avoid duplicates
+            
+            # Extract campaign IDs from breakdowns section
+            if isinstance(data, list):
+                for chain_data in data:
+                    if "rewards" in chain_data:
+                        for reward_data in chain_data["rewards"]:
+                            # Look for breakdowns section
+                            breakdowns = reward_data.get("breakdowns", [])
+                            for breakdown in breakdowns:
+                                campaign_id = breakdown.get("campaignId")
+                                if campaign_id:
+                                    campaign_ids.add(str(campaign_id))
+            
+            campaign_ids_list = list(campaign_ids)
+            logger.info(f"Found {len(campaign_ids_list)} unique campaign IDs: {campaign_ids_list}")
+            return campaign_ids_list
+            
+        except Exception as e:
+            logger.error(f"Error extracting campaign IDs: {str(e)}")
+            return []
 
 
 # Example usage and testing

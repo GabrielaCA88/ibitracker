@@ -60,16 +60,30 @@ class IBITracker {
         this.hideAllStates();
 
         try {
-            const response = await fetch(`${this.apiBaseUrl}/api/address-info/${address}`);
+            // Fetch main address data and lending data in parallel
+            const [addressResponse, lendingResponse] = await Promise.all([
+                fetch(`${this.apiBaseUrl}/api/address-info/${address}`),
+                fetch(`${this.apiBaseUrl}/api/lending-data/${address}`)
+            ]);
             
-            if (!response.ok) {
-                const errorData = await response.json();
+            if (!addressResponse.ok) {
+                const errorData = await addressResponse.json();
                 throw new Error(errorData.detail || 'Failed to fetch address data');
             }
 
-            const data = await response.json();
+            const data = await addressResponse.json();
+            let lendingData = null;
+            
+            // Handle lending data response (it might fail for some addresses)
+            if (lendingResponse.ok) {
+                const lendingResponseData = await lendingResponse.json();
+                lendingData = lendingResponseData.lending_data;
+            } else {
+                console.warn('Failed to fetch lending data, continuing without it');
+            }
+
             this.displayAddressInfo(data);
-            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens);
+            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData);
 
         } catch (error) {
             console.error('Error loading address data:', error);
@@ -127,7 +141,7 @@ class IBITracker {
         }
     }
 
-    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = []) {
+    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null) {
         const tokenList = document.getElementById('tokenList');
         const portfolioList = document.getElementById('portfolioList');
         tokenList.innerHTML = '';
@@ -142,7 +156,7 @@ class IBITracker {
         const { yieldTokens: regularYieldTokens, regularTokens } = this.separateTokens(tokenBalances);
 
         // Combine Midas data: merge Blockscout balance with yield token service data
-        const combinedYieldTokens = this.combineMidasData(regularYieldTokens, yieldTokensData);
+        const combinedYieldTokens = this.combineMidasData(regularYieldTokens, yieldTokensData, lendingData);
 
         // Calculate values including NFTs, Merkle rewards, and yield tokens
         this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData);
@@ -398,8 +412,12 @@ class IBITracker {
         return { yieldTokens, regularTokens };
     }
 
-    combineMidasData(regularYieldTokens, yieldTokensData) {
+    combineMidasData(regularYieldTokens, yieldTokensData, lendingData = null) {
         const combinedTokens = [];
+        
+        console.log('=== COMBINE MIDAS DATA DEBUG ===');
+        console.log('regularYieldTokens:', regularYieldTokens.map(t => ({ name: t.token.name, address: t.token.address_hash })));
+        console.log('lendingData:', lendingData);
         
         regularYieldTokens.forEach(tokenData => {
             const tokenAddress = tokenData.token.address_hash || '';
@@ -409,14 +427,49 @@ class IBITracker {
                 yieldData.token_address.toLowerCase() === tokenAddress.toLowerCase()
             );
             
-            if (matchingYieldData) {
-                // Combine Blockscout data with yield service data
+            // Check if this token has lending data (APR and price from lending service)
+            let lendingApr = null;
+            let lendingPrice = null;
+            
+            if (lendingData && lendingData.protocols) {
+                // Look through all protocols for matching explorer_address
+                for (const protocolName in lendingData.protocols) {
+                    const protocol = lendingData.protocols[protocolName];
+                    
+                    // Check APR data from campaign_breakdowns
+                    if (protocol.apr && protocol.apr.campaign_breakdowns) {
+                        for (const campaignId in protocol.apr.campaign_breakdowns) {
+                            const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
+                            const matchingAprData = breakdowns.find(breakdown => 
+                                breakdown.explorer_address && 
+                                breakdown.explorer_address.toLowerCase() === tokenAddress.toLowerCase()
+                            );
+                            if (matchingAprData) {
+                                lendingApr = matchingAprData.total_apr;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Check price data - now keyed by explorer_address
+                    if (protocol.price && protocol.price.token_prices) {
+                        // Direct lookup by explorer_address (tokenAddress)
+                        const priceData = protocol.price.token_prices[tokenAddress.toLowerCase()];
+                        if (priceData) {
+                            lendingPrice = priceData.price;
+                        }
+                    }
+                }
+            }
+            
+            if (matchingYieldData || lendingApr !== null || lendingPrice !== null) {
+                // Combine Blockscout data with yield service data and lending data
                 const combinedToken = {
                     ...tokenData,
                     yieldData: {
-                        price: matchingYieldData.price,
-                        apr: matchingYieldData.apr,
-                        protocol: matchingYieldData.protocol
+                        price: lendingPrice || (matchingYieldData ? matchingYieldData.price : null),
+                        apr: lendingApr || (matchingYieldData ? matchingYieldData.apr : null),
+                        protocol: matchingYieldData ? matchingYieldData.protocol : this.getProtocol(tokenData.token)
                     }
                 };
                 combinedTokens.push(combinedToken);
