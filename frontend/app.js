@@ -620,10 +620,6 @@ class IBITracker {
                             <span class="text-sm text-gray-600">${amountFormatted}</span>
                         </div>
                         <div class="text-sm text-gray-500">${tokenSymbol} @ $${this.formatPrice(tokenPrice)}</div>
-                        <div class="text-xs text-green-600 mt-1">
-                            <i class="fas fa-coins mr-1"></i>
-                            Claimable Reward
-                        </div>
                     </div>
                 </div>
                 <div class="text-right">
