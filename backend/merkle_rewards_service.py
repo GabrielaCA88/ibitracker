@@ -84,7 +84,7 @@ class MerkleRewardsService:
             Processed reward dictionary or None if invalid
         """
         try:
-            amount = reward_data.get("pending", "0")
+            amount = reward_data.get("amount", "0")
             token_info = reward_data.get("token", {})
             
             if not token_info:
