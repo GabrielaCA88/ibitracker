@@ -159,7 +159,7 @@ class IBITracker {
         const combinedYieldTokens = this.combineMidasData(regularYieldTokens, yieldTokensData, lendingData);
 
         // Calculate values including NFTs, Merkle rewards, and yield tokens
-        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData);
+        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData, lendingData);
 
         // Display regular tokens in Wallet
         if (regularTokens.length > 0) {
@@ -200,7 +200,7 @@ class IBITracker {
         }
     }
 
-    calculateAndDisplayValues(allTokens, yieldTokens, regularTokens, nftValuations = [], merkleRewards = [], yieldTokensData = []) {
+    calculateAndDisplayValues(allTokens, yieldTokens, regularTokens, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null) {
         // Calculate total tokens (ERC-20s only, excluding native rBTC)
         const erc20Tokens = allTokens.filter(token => token.token.type !== 'native');
         const totalTokens = erc20Tokens.length;
@@ -237,12 +237,11 @@ class IBITracker {
             }
         });
 
-        // Add Merkle rewards to productive value (rewards are considered productive assets)
+        // Add Merkle rewards to idle value (rewards are not considered productive assets)
         merkleRewards.forEach(rewardData => {
             const rewardValue = parseFloat(rewardData.usd_value) || 0;
             if (rewardValue > 0) {
-                totalValue += rewardValue;
-                productiveValue += rewardValue;
+                idleValue += rewardValue;
             }
         });
 
@@ -261,11 +260,53 @@ class IBITracker {
                 const tokenValue = balance * price;
                 
                 if (tokenValue > 0) {
-                    totalValue += tokenValue;
                     productiveValue += tokenValue;
                 }
             }
         });
+        
+        // Add lending service data to productive value
+        if (lendingData && lendingData.protocols) {
+            for (const protocolName in lendingData.protocols) {
+                const protocol = lendingData.protocols[protocolName];
+                
+                // Check APR data from campaign_breakdowns
+                if (protocol.apr && protocol.apr.campaign_breakdowns) {
+                    for (const campaignId in protocol.apr.campaign_breakdowns) {
+                        const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
+                        
+                        breakdowns.forEach(breakdown => {
+                            if (breakdown.explorer_address && breakdown.action) {
+                                // Find the corresponding token balance
+                                const matchingToken = allTokens.find(token => 
+                                    token.token.address_hash && 
+                                    token.token.address_hash.toLowerCase() === breakdown.explorer_address.toLowerCase()
+                                );
+                                
+                                if (matchingToken) {
+                                    const balance = parseFloat(matchingToken.value) / Math.pow(10, parseInt(matchingToken.token.decimals) || 18);
+                                    const price = breakdown.price || 0;
+                                    const tokenValue = balance * price;
+                                    
+                                    if (tokenValue > 0) {
+                                        if (breakdown.action === 'LEND') {
+                                            // Add LEND positions to productive value
+                                            productiveValue += tokenValue;
+                                        } else if (breakdown.action === 'BORROW') {
+                                            // Subtract BORROW positions from productive value
+                                            productiveValue -= tokenValue;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Calculate total value as sum of productive + idle
+        totalValue = productiveValue + idleValue;
         
         // Update the display
         document.getElementById('totalTokens').textContent = totalTokens;
