@@ -106,7 +106,6 @@ class TropykusModule(ProtocolModule):
             self.logger.info(f"Getting Tropykus user balance for {user_address}")
             result = self._run_node_script("getUserBalance", user_address, str(self.chain_id))
             return result
-                
         except Exception as e:
             self.logger.error(f"Error getting Tropykus user balance: {str(e)}")
             return {"error": str(e)}
@@ -122,6 +121,9 @@ class TropykusModule(ProtocolModule):
             self.logger.info("Getting Tropykus markets")
             result = self._run_node_script("getMarkets", str(self.chain_id))
             return result
+        except Exception as e:
+            self.logger.error(f"Error getting Tropykus markets: {str(e)}")
+            return {"error": str(e)}
     
     def get_supply_rate_per_block(self, token_address: str) -> Dict[str, Any]:
         """
