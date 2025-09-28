@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yield Tracker - Rootstock Portfolio Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Rootstock Brand Colors */
+        :root {
+            --rootstock-white: #FAF9F5;
+            --rootstock-black: #000000;
+            --rootstock-orange: #FF9100;
+            --rootstock-green: #79C600;
+            --rootstock-pink: #FF71E1;
+        }
+        
+        body {
+            background-color: var(--rootstock-white);
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, var(--rootstock-orange) 0%, var(--rootstock-pink) 100%);
+        }
+        
+        .card-hover {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .token-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, var(--rootstock-green) 0%, var(--rootstock-orange) 100%);
+        }
+        
+        .protocol-logo {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            object-fit: contain;
+            background: var(--rootstock-white);
+            padding: 2px;
+        }
+        .protocol-logo[src$=".png"] {
+            background: transparent;
+            padding: 0;
+        }
+        
+        /* Update button colors to use Rootstock Orange */
+        .bg-blue-600 {
+            background-color: var(--rootstock-orange) !important;
+        }
+        .bg-blue-700:hover {
+            background-color: #e67e00 !important;
+        }
+        .bg-green-600 {
+            background-color: var(--rootstock-green) !important;
+        }
+        .bg-green-700:hover {
+            background-color: #6bb300 !important;
+        }
+        
+        /* Update text colors */
+        .text-blue-600 {
+            color: var(--rootstock-orange) !important;
+        }
+        .text-blue-500 {
+            color: var(--rootstock-orange) !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="gradient-bg text-white py-6">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-chart-line text-2xl"></i>
+                    <h1 class="text-2xl font-bold">Yield Tracker</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm opacity-90">Token Balance Dashboard</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        <!-- Address Input Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">
+                    <i class="fas fa-search mr-2"></i>Search Address
+                </h2>
+                <span class="text-sm text-gray-500 hidden" id="addressDisplay"></span>
+            </div>
+            <div class="flex space-x-4 mb-4">
+                <input 
+                    type="text" 
+                    id="addressInput" 
+                    placeholder="Enter Rootstock address (e.g., 0x26d2E5bd1a418Aff98523a70ec4D12CB370cDD85)"
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                <button 
+                    id="searchBtn" 
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    <i class="fas fa-search mr-2"></i>Search
+                </button>
+                <button 
+                    id="downloadBtn" 
+                    class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors hidden"
+                >
+                    <i class="fas fa-download mr-2"></i>Export Excel
+                </button>
+            </div>
+            <!-- Address Stats -->
+            <div id="addressStats" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <div class="text-sm text-gray-600">Total Tokens</div>
+                    <div class="text-2xl font-bold text-gray-800" id="totalTokens">0</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <div class="text-sm text-gray-600">Total Value</div>
+                    <div class="text-2xl font-bold text-gray-800" id="totalValue">$0</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <div class="text-sm text-gray-600">Productive</div>
+                    <div class="text-2xl font-bold text-gray-800" id="productiveValue">$0</div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <div class="text-sm text-gray-600">Idle</div>
+                    <div class="text-2xl font-bold text-gray-800" id="idleValue">$0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-600">Loading token balances...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorState" class="hidden bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div class="flex items-center">
+                <i class="fas fa-exclamation-triangle text-red-500 mr-2"></i>
+                <span class="text-red-700" id="errorMessage"></span>
+            </div>
+        </div>
+
+        <!-- Wallet -->
+        <div id="tokenBalances" class="hidden mb-8">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800">
+                    <i class="fas fa-wallet mr-2"></i>Wallet
+                </h2>
+                <!-- Column Headers -->
+                <div class="grid grid-cols-5 gap-4 items-center py-2 px-4 bg-gray-50 rounded-lg mb-2">
+                    <div class="text-left font-semibold text-gray-600">Token</div>
+                    <div class="text-left font-semibold text-gray-600">Name</div>
+                    <div class="text-center font-semibold text-gray-600">Holdings</div>
+                    <div class="text-center font-semibold text-gray-600">Price</div>
+                    <div class="text-center font-semibold text-gray-600">USD Value</div>
+                </div>
+                <div id="tokenList" class="space-y-2">
+                    <!-- Token lines will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Portfolio -->
+        <div id="portfolioBalances" class="hidden">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">
+                <i class="fas fa-chart-line mr-2"></i>Portfolio
+            </h2>
+            <div id="portfolioList" class="space-y-3">
+                <!-- Portfolio cards will be dynamically inserted here -->
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="text-center py-12">
+            <i class="fas fa-wallet text-6xl text-gray-300 mb-4"></i>
+            <h3 class="text-xl font-semibold text-gray-600 mb-2">No Address Selected</h3>
+            <p class="text-gray-500">Enter a Rootstock address above to view token balances</p>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-6 mt-12">
+        <div class="container mx-auto px-4 text-center">
+            <p class="text-sm opacity-75">Yield Tracker - Powered by Rootstock Explorer</p>
+            <div class="mt-4 text-sm opacity-70 max-w-4xl mx-auto">
+                <p class="mb-2">The protocols referenced are third-party applications and are not developed, operated, or endorsed by Rootstock, RootstockLabs, or this website. Engaging with DeFi protocols involves risk, including the potential loss of digital assets. All content is provided "as is" without warranties of any kind. Users interact with any mentioned protocols at their own risk.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

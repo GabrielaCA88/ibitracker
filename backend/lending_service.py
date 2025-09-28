@@ -36,316 +36,83 @@ class ProtocolModule(ABC):
 
 
 class TropykusModule(ProtocolModule):
-    """Tropykus protocol module for APR and price calculations"""
+    """Tropykus protocol module for APR and price calculations using GraphQL"""
     
     def __init__(self):
         self.protocol_name = "Tropykus"
-        self.chain_id = 30  # RSK Mainnet
         self.logger = logging.getLogger(__name__)
-        self.sdk_script_path = os.path.join(os.path.dirname(__file__), "tropykus_sdk.js")
-        # Initialize Web3 connection to RSK mainnet
-        self.w3 = Web3(Web3.HTTPProvider('https://public-node.rsk.co'))
-        # Note: Token addresses will be dynamically retrieved from markets API
+        self.graphql_endpoint = "https://graphql1.tropykus.com/"
     
-    def _run_node_script(self, command: str, *args) -> Dict[str, Any]:
+    def get_graphql_data(self, user_address: str) -> Dict[str, Any]:
         """
-        Run the Node.js Tropykus SDK script
-        
-        Args:
-            command: The command to run (getUserBalance, getMarkets, etc.)
-            *args: Additional arguments for the command
-            
-        Returns:
-            Dictionary containing the result or error
-        """
-        try:
-            # Build the command
-            cmd = ['node', self.sdk_script_path, command] + list(args)
-            
-            # Run the Node.js script
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=os.path.dirname(self.sdk_script_path)
-            )
-            
-            if result.returncode == 0:
-                # Parse JSON output
-                return json.loads(result.stdout)
-            else:
-                # Parse error output
-                error_data = json.loads(result.stderr) if result.stderr else {"error": "Unknown error"}
-                self.logger.error(f"Node.js script error: {error_data}")
-                return error_data
-                
-        except subprocess.TimeoutExpired:
-            self.logger.error("Node.js script timeout")
-            return {"error": "Script timeout"}
-        except json.JSONDecodeError as e:
-            self.logger.error(f"JSON decode error: {e}")
-            self.logger.error(f"Script stdout: {result.stdout}")
-            self.logger.error(f"Script stderr: {result.stderr}")
-            return {"error": f"JSON decode error: {e}"}
-        except Exception as e:
-            self.logger.error(f"Error running Node.js script: {e}")
-            return {"error": str(e)}
-    
-    def get_user_balance(self, user_address: str) -> Dict[str, Any]:
-        """
-        Get user balance from Tropykus using the SDK
+        Get user data from Tropykus using GraphQL
         
         Args:
             user_address: User wallet address
             
         Returns:
-            Dictionary containing user balance data
+            Dictionary containing user balance data with markets, deposits, borrows, and rates
         """
         try:
-            self.logger.info(f"Getting Tropykus user balance for {user_address}")
-            result = self._run_node_script("getUserBalance", user_address, str(self.chain_id))
-            return result
-        except Exception as e:
-            self.logger.error(f"Error getting Tropykus user balance: {str(e)}")
-            return {"error": str(e)}
-    
-    def get_markets(self) -> Dict[str, Any]:
-        """
-        Get markets information from Tropykus using the SDK
-        
-        Returns:
-            Dictionary containing markets data
-        """
-        try:
-            self.logger.info("Getting Tropykus markets")
-            result = self._run_node_script("getMarkets", str(self.chain_id))
-            return result
-        except Exception as e:
-            self.logger.error(f"Error getting Tropykus markets: {str(e)}")
-            return {"error": str(e)}
-    
-    def get_supply_rate_per_block(self, token_address: str) -> Dict[str, Any]:
-        """
-        Get supply rate per block for a specific token from Tropykus contract
-        
-        Args:
-            token_address: Token contract address
+            self.logger.info(f"Getting Tropykus data for {user_address}")
             
-        Returns:
-            Dictionary containing supply rate data
-        """
-        try:
-            self.logger.info(f"Getting Tropykus supply rate for token {token_address}")
-            
-            # Check if Web3 is connected
-            if not self.w3.is_connected():
-                self.logger.error("Web3 not connected to RSK network")
-                return {"error": "Web3 connection failed"}
-            
-            # Contract ABI for supplyRatePerBlock function
-            contract_abi = [
-                {
-                    "inputs": [],
-                    "name": "supplyRatePerBlock",
-                    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                    "stateMutability": "view",
-                    "type": "function"
+            query = """
+            query FindManyUserBalances($where: User_balancesWhereInput!) {
+              findManyUser_balances(where: $where) {
+                markets {
+                  name
+                  supply_rate
+                  borrow_rate
+                  underlying_token_price
+                  underlying_token_name 
                 }
-            ]
+                deposits
+                brute_deposits
+                brute_deposits_historic
+                brute_borrows_historic
+                borrows
+                brute_borrows
+                users {
+                  address_lowercase
+                }
+              }
+            }
+            """
             
-            # Create contract instance
-            contract = self.w3.eth.contract(
-                address=Web3.to_checksum_address(token_address),
-                abi=contract_abi
-            )
-            
-            # Call supplyRatePerBlock function
-            supply_rate_per_block = contract.functions.supplyRatePerBlock().call()
-            
-            # Convert from wei to readable format (assuming 18 decimals)
-            supply_rate_formatted = supply_rate_per_block / (10 ** 18)
-            
-            return {
-                "token_address": token_address,
-                "supply_rate_per_block": str(supply_rate_per_block),
-                "supply_rate_formatted": supply_rate_formatted,
-                "note": "Successfully retrieved from contract"
+            variables = {
+                "where": {
+                    "users": {
+                        "is": {
+                            "address_lowercase": { "equals": user_address.lower() }
+                        }
+                    }
+                }
             }
             
+            payload = {"query": query, "variables": variables}
+            
+            response = requests.post(self.graphql_endpoint, json=payload, timeout=30)
+            
+            if response.status_code != 200:
+                self.logger.error(f"GraphQL request failed with status {response.status_code}: {response.text}")
+                return {"error": f"GraphQL request failed with status {response.status_code}"}
+            
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"GraphQL request error: {e}")
+            return {"error": str(e)}
         except Exception as e:
-            self.logger.error(f"Error getting Tropykus supply rate: {str(e)}")
+            self.logger.error(f"Error getting Tropykus data: {e}")
             return {"error": str(e)}
     
     def get_apr_data(self, campaign_ids: List[str], user_address: str = None) -> Dict[str, Any]:
-        """
-        Get APR data for Tropykus protocol, filtered by active user positions
-        
-        Args:
-            campaign_ids: List of campaign IDs (not used for Tropykus)
-            user_address: User address to filter active markets
-            
-        Returns:
-            Dictionary containing APR data
-        """
-        try:
-            self.logger.info(f"Getting Tropykus APR data for user: {user_address}")
-            
-            # Get user balance to determine active markets
-            if user_address:
-                user_balance = self.get_user_balance(user_address)
-                if "error" in user_balance:
-                    return user_balance
-                
-                # Extract active markets (where user has deposits or borrows > 0)
-                active_markets = []
-                user_data = user_balance.get("data", [])
-                for market_data in user_data:
-                    deposits = float(market_data.get("deposits", "0"))
-                    borrows = float(market_data.get("borrows", "0"))
-                    if deposits > 0 or borrows > 0:
-                        active_markets.append(market_data.get("market"))
-                
-                self.logger.info(f"Active markets for user {user_address}: {active_markets}")
-            else:
-                # If no user address, return all markets
-                active_markets = None
-            
-            # Get markets data
-            markets_data = self.get_markets()
-            
-            if "error" in markets_data:
-                return markets_data
-            
-            # Process markets data to extract APR information
-            all_markets = markets_data.get("data", {}).get("findManyMarkets", [])
-            
-            # Filter markets based on active user positions
-            if active_markets:
-                filtered_markets = [market for market in all_markets if market.get("name") in active_markets]
-            else:
-                filtered_markets = all_markets
-            
-            # Process markets to extract APR data with both supply and borrow rates
-            apr_breakdowns = {}
-            for market in filtered_markets:
-                market_name = market.get("name", "UNKNOWN")
-                contract_address = market.get("contract_address", "").lower()
-                supply_rate = float(market.get("supply_rate", "0"))
-                borrow_rate = float(market.get("borrow_rate", "0"))
-                
-                # Create entries for both LEND and BORROW actions
-                apr_breakdowns[f"{market_name}_LEND"] = {
-                    "reserve_address": contract_address,
-                    "action": "LEND",
-                    "organic_apr": supply_rate,
-                    "incentivized_apr": 0.0,  # Tropykus doesn't have incentivized APR
-                    "total_apr": supply_rate,
-                    "supply_rate": supply_rate,
-                    "borrow_rate": borrow_rate,
-                    "market_name": market_name,
-                    "contract_address": contract_address
-                }
-                
-                apr_breakdowns[f"{market_name}_BORROW"] = {
-                    "reserve_address": contract_address,
-                    "action": "BORROW", 
-                    "organic_apr": -borrow_rate,  # Borrow rates are negative for users
-                    "incentivized_apr": 0.0,  # Tropykus doesn't have incentivized APR
-                    "total_apr": -borrow_rate,
-                    "supply_rate": supply_rate,
-                    "borrow_rate": borrow_rate,
-                    "market_name": market_name,
-                    "contract_address": contract_address
-                }
-            
-            apr_data = {
-                "campaign_breakdowns": apr_breakdowns,
-                "protocol": self.protocol_name,
-                "markets": {"findManyMarkets": filtered_markets}
-            }
-            
-            self.logger.info(f"Retrieved Tropykus APR data for {len(filtered_markets)} markets")
-            return apr_data
-            
-        except Exception as e:
-            self.logger.error(f"Error getting Tropykus APR data: {str(e)}")
-            return {"error": str(e)}
+        """Get APR data for the protocol"""
+        return {"campaign_breakdowns": {}}
     
     def get_price_data(self, campaign_ids: List[str], user_address: str = None) -> Dict[str, Any]:
-        """
-        Get price data for Tropykus protocol, filtered by active user positions
-        
-        Args:
-            campaign_ids: List of campaign IDs (not used for Tropykus)
-            user_address: User address to filter active markets
-            
-        Returns:
-            Dictionary containing price data
-        """
-        try:
-            self.logger.info(f"Getting Tropykus price data for user: {user_address}")
-            
-            # Get user balance to determine active markets
-            if user_address:
-                user_balance = self.get_user_balance(user_address)
-                if "error" in user_balance:
-                    return user_balance
-                
-                # Extract active markets (where user has deposits or borrows > 0)
-                active_markets = []
-                user_data = user_balance.get("data", [])
-                for market_data in user_data:
-                    deposits = float(market_data.get("deposits", "0"))
-                    borrows = float(market_data.get("borrows", "0"))
-                    if deposits > 0 or borrows > 0:
-                        active_markets.append(market_data.get("market"))
-                
-                self.logger.info(f"Active markets for user {user_address}: {active_markets}")
-            else:
-                # If no user address, return all markets
-                active_markets = None
-            
-            # Get markets data
-            markets_data = self.get_markets()
-            
-            if "error" in markets_data:
-                return markets_data
-            
-            # Process markets data to extract price information
-            all_markets = markets_data.get("data", {}).get("findManyMarkets", [])
-            
-            # Filter markets based on active user positions
-            if active_markets:
-                filtered_markets = [market for market in all_markets if market.get("name") in active_markets]
-            else:
-                filtered_markets = all_markets
-            
-            token_prices = {}
-            for market in filtered_markets:
-                if isinstance(market, dict):
-                    token_address = market.get("underlying_token_address", "").lower()
-                    price = market.get("underlying_token_price", "0")
-                    
-                    if token_address and price and token_address != "none":
-                        token_prices[token_address] = {
-                            "price": float(price),
-                            "symbol": market.get("name", "UNKNOWN"),
-                            "decimals": 18  # Default for most tokens
-                        }
-            
-            price_data = {
-                "token_prices": token_prices,
-                "protocol": self.protocol_name,
-                "markets_count": len(filtered_markets)
-            }
-            
-            self.logger.info(f"Retrieved Tropykus price data for {len(token_prices)} tokens from {len(filtered_markets)} markets")
-            return price_data
-            
-        except Exception as e:
-            self.logger.error(f"Error getting Tropykus price data: {str(e)}")
-            return {"error": str(e)}
+        """Get price data for the protocol"""
+        return {"token_prices": {}}
     
     def get_user_portfolio_data(self, user_address: str) -> Dict[str, Any]:
         """
@@ -360,76 +127,46 @@ class TropykusModule(ProtocolModule):
         try:
             self.logger.info(f"Getting Tropykus portfolio data for user: {user_address}")
             
-            # Get user balance
-            user_balance = self.get_user_balance(user_address)
-            if "error" in user_balance:
-                # If user has no Tropykus positions, return empty portfolio
-                self.logger.info(f"User {user_address} has no Tropykus positions or error occurred: {user_balance.get('error', 'Unknown error')}")
+            # Get GraphQL data
+            graphql_data = self.get_graphql_data(user_address)
+            if "error" in graphql_data:
+                self.logger.info(f"User {user_address} has no Tropykus positions or error occurred: {graphql_data.get('error', 'Unknown error')}")
                 return {
                     "protocol": self.protocol_name,
                     "portfolio_items": [],
                     "total_items": 0
                 }
             
-            # Get markets data for prices and APR
-            markets_data = self.get_markets()
-            if "error" in markets_data:
-                return markets_data
-            
-            # Get APR data
-            apr_data = self.get_apr_data([], user_address)
-            if "error" in apr_data:
-                return apr_data
-            
-            # Get price data
-            price_data = self.get_price_data([], user_address)
-            if "error" in price_data:
-                return price_data
-            
             # Process user balance data
-            user_data = user_balance.get("data", [])
-            all_markets = markets_data.get("data", {}).get("findManyMarkets", [])
-            apr_breakdowns = apr_data.get("campaign_breakdowns", {})
-            token_prices = price_data.get("token_prices", {})
-            
+            user_data = graphql_data.get("data", {}).get("findManyUser_balances", [])
             portfolio_items = []
             
             for market_data in user_data:
-                market_name = market_data.get("market", "")
+                market_name = market_data.get("markets", {}).get("name", "")
                 deposits = float(market_data.get("deposits", "0"))
                 borrows = float(market_data.get("borrows", "0"))
                 
-                # Only include markets where user has deposits (for portfolio cards)
+                # Only include markets where user has deposits > 0
                 if deposits > 0:
-                    # Find market info
-                    market_info = None
-                    for market in all_markets:
-                        if market.get("name") == market_name:
-                            market_info = market
-                            break
+                    underlying_token_name = market_data.get("markets", {}).get("underlying_token_name", market_name)
+                    underlying_token_price = float(market_data.get("markets", {}).get("underlying_token_price", "0"))
+                    supply_rate = float(market_data.get("markets", {}).get("supply_rate", "0"))
                     
-                    if market_info:
-                        underlying_token_address = market_info.get("underlying_token_address", "").lower()
-                        underlying_token_symbol = market_info.get("name", "UNKNOWN")
-                        underlying_token_price = float(market_info.get("underlying_token_price", "0"))
-                        supply_rate = float(market_info.get("supply_rate", "0"))
-                        
-                        # Calculate USD value
-                        usd_value = deposits * underlying_token_price
-                        
-                        portfolio_item = {
-                            "protocol": "Tropykus",
-                            "market_name": market_name,
-                            "underlying_token_address": underlying_token_address,
-                            "underlying_token_symbol": underlying_token_symbol,
-                            "balance": deposits,
-                            "price": underlying_token_price,
-                            "apr": supply_rate,
-                            "usd_value": usd_value,
-                            "action": "LEND"
-                        }
-                        
-                        portfolio_items.append(portfolio_item)
+                    # Calculate USD value
+                    usd_value = deposits * underlying_token_price
+                    
+                    portfolio_item = {
+                        "protocol": "Tropykus",
+                        "market_name": market_name,
+                        "underlying_token_name": underlying_token_name,
+                        "balance": deposits,
+                        "price": underlying_token_price,
+                        "apr": supply_rate,
+                        "usd_value": usd_value,
+                        "action": "LEND"
+                    }
+                    
+                    portfolio_items.append(portfolio_item)
             
             return {
                 "protocol": self.protocol_name,
@@ -971,6 +708,27 @@ class LendingService:
                 "last_updated": None,
                 "error": str(e)
             }
+    
+    def get_tropykus_portfolio_data(self, address: str) -> Dict[str, Any]:
+        """
+        Get Tropykus portfolio data for an address
+        
+        Args:
+            address: Wallet address to get Tropykus portfolio data for
+            
+        Returns:
+            Dictionary containing Tropykus portfolio data
+        """
+        try:
+            tropykus_module = self.protocols.get("tropykus")
+            if not tropykus_module:
+                return {"error": "Tropykus module not available"}
+            
+            return tropykus_module.get_user_portfolio_data(address)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting Tropykus portfolio data for address {address}: {str(e)}")
+            return {"error": str(e)}
     
     def get_lending_data(self, campaign_ids: List[str], user_address: str = None) -> Dict[str, Any]:
         """

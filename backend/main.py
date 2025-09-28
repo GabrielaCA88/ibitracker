@@ -20,7 +20,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_folder='../frontend', static_url_path='')
+app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
 # Initialize services
@@ -320,7 +320,7 @@ def get_tropykus_portfolio(address: str):
         if not tropykus_module:
             return jsonify({"error": "Tropykus module not available"}), 500
         
-        portfolio_data = tropykus_module.get_user_portfolio_data(address)
+        portfolio_data = lending_service.get_tropykus_portfolio_data(address)
         
         return jsonify({
             "address": address,
