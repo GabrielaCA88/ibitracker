@@ -1,18 +1,51 @@
 #!/usr/bin/env node
 
+// Debug: Check what's actually in the package
+const fs = require('fs');
+const path = require('path');
+
+const packagePath = path.join(__dirname, 'node_modules', '@tropykus', 'tropykus-js');
+console.log('Package path:', packagePath);
+console.log('Package exists:', fs.existsSync(packagePath));
+
+if (fs.existsSync(packagePath)) {
+    console.log('Package contents:', fs.readdirSync(packagePath));
+    
+    const distPath = path.join(packagePath, 'dist');
+    if (fs.existsSync(distPath)) {
+        console.log('Dist contents:', fs.readdirSync(distPath));
+        
+        const nodejsPath = path.join(distPath, 'nodejs');
+        if (fs.existsSync(nodejsPath)) {
+            console.log('Nodejs contents:', fs.readdirSync(nodejsPath));
+        }
+    }
+    
+    const packageJsonPath = path.join(packagePath, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+        console.log('Package.json main:', packageJson.main);
+        console.log('Package.json files:', packageJson.files);
+    }
+}
+
 // Try different import paths
 let Tropykus;
 try {
     Tropykus = require("@tropykus/tropykus-js");
+    console.log('Success with @tropykus/tropykus-js');
 } catch (e1) {
     try {
         Tropykus = require("@tropykus/tropykus-js/dist/index");
+        console.log('Success with @tropykus/tropykus-js/dist/index');
     } catch (e2) {
         try {
             Tropykus = require("@tropykus/tropykus-js/lib/index");
+            console.log('Success with @tropykus/tropykus-js/lib/index');
         } catch (e3) {
             try {
                 Tropykus = require("@tropykus/tropykus-js/src/index");
+                console.log('Success with @tropykus/tropykus-js/src/index');
             } catch (e4) {
                 console.error(JSON.stringify({ 
                     error: "Cannot find @tropykus/tropykus-js module", 
