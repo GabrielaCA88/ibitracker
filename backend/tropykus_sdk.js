@@ -1,6 +1,28 @@
 #!/usr/bin/env node
 
-const Tropykus = require("@tropykus/tropykus-js");
+// Try different import paths
+let Tropykus;
+try {
+    Tropykus = require("@tropykus/tropykus-js");
+} catch (e1) {
+    try {
+        Tropykus = require("@tropykus/tropykus-js/dist/index");
+    } catch (e2) {
+        try {
+            Tropykus = require("@tropykus/tropykus-js/lib/index");
+        } catch (e3) {
+            try {
+                Tropykus = require("@tropykus/tropykus-js/src/index");
+            } catch (e4) {
+                console.error(JSON.stringify({ 
+                    error: "Cannot find @tropykus/tropykus-js module", 
+                    attempts: [e1.message, e2.message, e3.message, e4.message] 
+                }));
+                process.exit(1);
+            }
+        }
+    }
+}
 
 async function getUserBalance(userAddress, chainId = 30) {
     try {
