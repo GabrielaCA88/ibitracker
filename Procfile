@@ -1,1 +1,1 @@
-web: curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt-get install -y nodejs && cd backend && npm install && cd node_modules/@tropykus/tropykus-js && npm install && npm run build && cd ../../../ && echo "Build completed, starting Python app" && python main.py
+web: curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt-get install -y nodejs && cd backend && npm install && echo "Node.js dependencies installed" && python main.py
