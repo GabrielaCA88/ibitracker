@@ -8,12 +8,17 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from dotenv import load_dotenv
+import logging
 from nft_service import NFTService
 from merkle_rewards_service import MerkleRewardsService
 from yield_token_service import YieldTokenService
 from lending_service import LendingService
 
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
@@ -26,7 +31,7 @@ lending_service = LendingService()
 
 # Rootstock APIs
 ROOTSTOCK_API_BASE = "https://rootstock.blockscout.com/api/v2"
-ROOTSTOCK_EXPLORER_API = "https://be.explorer.rootstock.io/api"
+ROOTSTOCK_EXPLORER_API = "https://be.explorer.rootstock.io/api/v3"
 
 class TokenBalance:
     def __init__(self, data):
@@ -109,7 +114,7 @@ def get_native_rbtc_balance(address):
     try:
         # Explorer API requires lowercase addresses
         lowercase_address = address.lower()
-        url = f"{ROOTSTOCK_EXPLORER_API}?module=balances&action=getBalances&address={lowercase_address}"
+        url = f"{ROOTSTOCK_EXPLORER_API}/balances/address/{lowercase_address}?take=1"
         
         response = requests.get(url, timeout=10)
         
@@ -121,14 +126,13 @@ def get_native_rbtc_balance(address):
         if "data" in data and len(data["data"]) > 0:
             # Get the latest balance (first item in the list)
             latest_balance = data["data"][0]
-            balance_hex = latest_balance.get("balance", "0x0")
+            balance_str = latest_balance.get("balance", "0")
             
-            # Convert hex to decimal
-            balance_wei = int(balance_hex, 16)
-            balance_rbtc = balance_wei / 1e18  # Convert from wei to rBTC
+            # Balance is already formatted as decimal string in v3 API
+            balance_rbtc = float(balance_str)
             
             return {
-                "balance": str(balance_wei),
+                "balance": balance_str,
                 "balance_formatted": balance_rbtc,
                 "symbol": "rBTC",
                 "name": "Rootstock Smart Bitcoin",
@@ -226,23 +230,29 @@ def get_address_info(address: str):
                     rbtc_price = balance["token"]["exchange_rate"]
                     break
             
-            # If no RBTC/WRBTC price found in existing tokens, try to get WRBTC price from lending service
+            # If no RBTC/WRBTC price found in existing tokens, try to get WRBTC price from Blockscout API
             if not rbtc_price:
                 try:
-                    # Get lending data to extract WRBTC price
-                    lending_data = lending_service.get_lending_data_for_address(address)
-                    if lending_data and "protocols" in lending_data:
-                        for protocol_name, protocol_data in lending_data["protocols"].items():
-                            if "price" in protocol_data and "token_prices" in protocol_data["price"]:
-                                # Look for WRBTC price in token_prices
-                                for explorer_address, price_data in protocol_data["price"]["token_prices"].items():
-                                    if explorer_address.lower() == "0xb87cbf55c42989fc3456d4c499ad0bb602a6c1bd":  # LayerBank WRBTC
-                                        rbtc_price = price_data["price"]
-                                        break
-                                if rbtc_price:
-                                    break
+                    # Get WRBTC price from Blockscout API using the WRBTC contract address - as the API has no price for the native asset. 
+                    wrbtc_address = "0x542fda317318ebf1d3deaf76e0b632741a7e677d"
+                    wrbtc_url = f"https://rootstock.blockscout.com/api/v2/tokens/{wrbtc_address}"
+                    
+                    logger.info(f"Fetching WRBTC price from: {wrbtc_url}")
+                    response = requests.get(wrbtc_url, timeout=10)
+                    logger.info(f"Blockscout API response status: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        logger.info(f"Blockscout API response: {data}")
+                        if "exchange_rate" in data and data["exchange_rate"]:
+                            rbtc_price = float(data["exchange_rate"])
+                            logger.info(f"Retrieved WRBTC price from Blockscout: ${rbtc_price}")
+                        else:
+                            logger.warning(f"No exchange_rate found in Blockscout response: {data}")
+                    else:
+                        logger.warning(f"Blockscout API returned status {response.status_code}: {response.text}")
                 except Exception as e:
-                    logger.warning(f"Could not fetch WRBTC price from lending service: {str(e)}")
+                    logger.warning(f"Could not fetch WRBTC price from Blockscout API: {str(e)}")
             
             if rbtc_price:
                 native_token_data["token"]["exchange_rate"] = rbtc_price
@@ -298,6 +308,27 @@ def get_lending_data(address: str):
         
     except Exception as e:
         return jsonify({"error": f"Error fetching lending data: {str(e)}"}), 500
+
+@app.route("/api/tropykus-portfolio/<address>")
+def get_tropykus_portfolio(address: str):
+    """
+    Get Tropykus portfolio data for an address
+    """
+    try:
+        # Get Tropykus portfolio data
+        tropykus_module = lending_service.protocols.get("tropykus")
+        if not tropykus_module:
+            return jsonify({"error": "Tropykus module not available"}), 500
+        
+        portfolio_data = tropykus_module.get_user_portfolio_data(address)
+        
+        return jsonify({
+            "address": address,
+            "tropykus_portfolio": portfolio_data
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Error fetching Tropykus portfolio data: {str(e)}"}), 500
 
 @app.route("/api/export-excel/<address>")
 def export_to_excel(address: str):

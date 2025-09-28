@@ -132,3 +132,33 @@ class YieldTokenService:
         except Exception as e:
             self.logger.error(f"Error getting price for {token_address}: {str(e)}")
             return 0
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Test with a real address
+    test_address = "0x26d2e5bd1a418aff98523a70ec4d12cb370cdd85"
+    
+    print(f"Testing YieldTokenService with address: {test_address}")
+    
+    # Create service instance
+    yield_service = YieldTokenService()
+    
+    # Test getting yield token data
+    print(f"\n=== YIELD TOKEN DATA TEST ===")
+    yield_data = yield_service.get_yield_token_data(test_address)
+    print("Yield Token Data Result:", yield_data)
+    
+    # Test getting specific token APR
+    print(f"\n=== TOKEN APR TEST ===")
+    mbtc_apr = yield_service.get_token_apr("mbtc")
+    print(f"mBTC APR: {mbtc_apr}%")
+    
+    # Test getting specific token price
+    print(f"\n=== TOKEN PRICE TEST ===")
+    mbtc_address = "0xEF85254Aa4a8490bcC9C02Ae38513Cae8303FB53"
+    mbtc_price = yield_service.get_token_price(test_address, mbtc_address)
+    print(f"mBTC Price: ${mbtc_price}")

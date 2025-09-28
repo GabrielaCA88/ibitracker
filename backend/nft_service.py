@@ -12,7 +12,7 @@ class NFTService:
     """
     
     def __init__(self):
-        self.rootstock_api_base = "https://rootstock.blockscout.com/api/v2"
+        self.blockscout_api_base = "https://rootstock.blockscout.com/api/v2"
         self.icarus_api_base = "https://omni.icarus.tools/rootstock/cush/analyticsPosition"
     
     def get_nft_data(self, address: str) -> List[Dict[str, Any]]:
@@ -28,7 +28,7 @@ class NFTService:
         try:
             # Convert address to lowercase for API consistency
             lowercase_address = address.lower()
-            url = f"{self.rootstock_api_base}/addresses/{lowercase_address}/nft?type=ERC-721%2CERC-404%2CERC-1155"
+            url = f"{self.blockscout_api_base}/addresses/{lowercase_address}/nft?type=ERC-721%2CERC-404%2CERC-1155"
             
             logger.info(f"Fetching NFT data for address: {lowercase_address}")
             response = requests.get(url, timeout=10)

@@ -60,10 +60,11 @@ class IBITracker {
         this.hideAllStates();
 
         try {
-            // Fetch main address data and lending data in parallel
-            const [addressResponse, lendingResponse] = await Promise.all([
+            // Fetch main address data, lending data, and Tropykus portfolio data in parallel
+            const [addressResponse, lendingResponse, tropykusResponse] = await Promise.all([
                 fetch(`${this.apiBaseUrl}/api/address-info/${address}`),
-                fetch(`${this.apiBaseUrl}/api/lending-data/${address}`)
+                fetch(`${this.apiBaseUrl}/api/lending-data/${address}`),
+                fetch(`${this.apiBaseUrl}/api/tropykus-portfolio/${address}`)
             ]);
             
             if (!addressResponse.ok) {
@@ -73,6 +74,7 @@ class IBITracker {
 
             const data = await addressResponse.json();
             let lendingData = null;
+            let tropykusData = null;
             
             // Handle lending data response (it might fail for some addresses)
             if (lendingResponse.ok) {
@@ -81,9 +83,17 @@ class IBITracker {
             } else {
                 console.warn('Failed to fetch lending data, continuing without it');
             }
+            
+            // Handle Tropykus portfolio data response (it might fail for some addresses)
+            if (tropykusResponse.ok) {
+                const tropykusResponseData = await tropykusResponse.json();
+                tropykusData = tropykusResponseData.tropykus_portfolio;
+            } else {
+                console.warn('Failed to fetch Tropykus portfolio data, continuing without it');
+            }
 
             this.displayAddressInfo(data);
-            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData);
+            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData, tropykusData);
 
         } catch (error) {
             console.error('Error loading address data:', error);
@@ -141,7 +151,7 @@ class IBITracker {
         }
     }
 
-    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null) {
+    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null, tropykusData = null) {
         const tokenList = document.getElementById('tokenList');
         const portfolioList = document.getElementById('portfolioList');
         tokenList.innerHTML = '';
@@ -158,8 +168,8 @@ class IBITracker {
         // Combine Midas data: merge Blockscout balance with yield token service data
         const combinedYieldTokens = this.combineMidasData(regularYieldTokens, yieldTokensData, lendingData);
 
-        // Calculate values including NFTs, Merkle rewards, and yield tokens
-        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData, lendingData);
+        // Calculate values including NFTs, Merkle rewards, yield tokens, and Tropykus
+        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData, lendingData, tropykusData);
 
         // Display regular tokens in Wallet
         if (regularTokens.length > 0) {
@@ -194,13 +204,21 @@ class IBITracker {
             });
         }
 
-        // Show portfolio section if there are yield tokens, NFTs, or rewards
-        if (combinedYieldTokens.length > 0 || nftValuations.length > 0 || merkleRewards.length > 0) {
+        // Display Tropykus portfolio items
+        if (tropykusData && tropykusData.portfolio_items && tropykusData.portfolio_items.length > 0) {
+            tropykusData.portfolio_items.forEach(item => {
+                const tropykusCard = this.createTropykusCard(item);
+                portfolioList.appendChild(tropykusCard);
+            });
+        }
+
+        // Show portfolio section if there are yield tokens, NFTs, rewards, or Tropykus items
+        if (combinedYieldTokens.length > 0 || nftValuations.length > 0 || merkleRewards.length > 0 || (tropykusData && tropykusData.portfolio_items && tropykusData.portfolio_items.length > 0)) {
             document.getElementById('portfolioBalances').classList.remove('hidden');
         }
     }
 
-    calculateAndDisplayValues(allTokens, yieldTokens, regularTokens, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null) {
+    calculateAndDisplayValues(allTokens, yieldTokens, regularTokens, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null, tropykusData = null) {
         // Calculate total tokens (ERC-20s only, excluding native rBTC)
         const erc20Tokens = allTokens.filter(token => token.token.type !== 'native');
         const totalTokens = erc20Tokens.length;
@@ -275,7 +293,9 @@ class IBITracker {
                     for (const campaignId in protocol.apr.campaign_breakdowns) {
                         const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
                         
-                        breakdowns.forEach(breakdown => {
+                        // Ensure breakdowns is an array before calling forEach
+                        if (Array.isArray(breakdowns)) {
+                            breakdowns.forEach(breakdown => {
                             if (breakdown.explorer_address && breakdown.action) {
                                 // Find the corresponding token balance
                                 const matchingToken = allTokens.find(token => 
@@ -300,9 +320,20 @@ class IBITracker {
                                 }
                             }
                         });
+                        }
                     }
                 }
             }
+        }
+        
+        // Add Tropykus portfolio data to productive value
+        if (tropykusData && tropykusData.portfolio_items && tropykusData.portfolio_items.length > 0) {
+            tropykusData.portfolio_items.forEach(item => {
+                const tropykusValue = parseFloat(item.usd_value) || 0;
+                if (tropykusValue > 0) {
+                    productiveValue += tropykusValue;
+                }
+            });
         }
         
         // Calculate total value as sum of productive + idle
@@ -481,13 +512,16 @@ class IBITracker {
                     if (protocol.apr && protocol.apr.campaign_breakdowns) {
                         for (const campaignId in protocol.apr.campaign_breakdowns) {
                             const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
-                            const matchingAprData = breakdowns.find(breakdown => 
-                                breakdown.explorer_address && 
-                                breakdown.explorer_address.toLowerCase() === tokenAddress.toLowerCase()
-                            );
-                            if (matchingAprData) {
-                                lendingApr = matchingAprData.total_apr;
-                                break;
+                            // Ensure breakdowns is an array before calling find
+                            if (Array.isArray(breakdowns)) {
+                                const matchingAprData = breakdowns.find(breakdown => 
+                                    breakdown.explorer_address && 
+                                    breakdown.explorer_address.toLowerCase() === tokenAddress.toLowerCase()
+                                );
+                                if (matchingAprData) {
+                                    lendingApr = matchingAprData.total_apr;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -505,11 +539,12 @@ class IBITracker {
             
             if (matchingYieldData || lendingApr !== null || lendingPrice !== null) {
                 // Combine Blockscout data with yield service data and lending data
+                // Prioritize yield token APR over lending APR for yield tokens
                 const combinedToken = {
                     ...tokenData,
                     yieldData: {
                         price: lendingPrice || (matchingYieldData ? matchingYieldData.price : null),
-                        apr: lendingApr || (matchingYieldData ? matchingYieldData.apr : null),
+                        apr: (matchingYieldData ? matchingYieldData.apr : null) || lendingApr,
                         protocol: matchingYieldData ? matchingYieldData.protocol : this.getProtocol(tokenData.token)
                     }
                 };
@@ -675,6 +710,57 @@ class IBITracker {
         return card;
     }
 
+    createTropykusCard(tropykusData) {
+        const card = document.createElement('div');
+        card.className = 'bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg shadow-md p-4 card-hover border-l-4 border-purple-500';
+        
+        const protocol = tropykusData.protocol || 'Tropykus';
+        const marketName = tropykusData.market_name || 'Unknown';
+        const underlyingTokenSymbol = tropykusData.underlying_token_symbol || 'Unknown';
+        const balance = parseFloat(tropykusData.balance) || 0;
+        const price = parseFloat(tropykusData.price) || 0;
+        const apr = parseFloat(tropykusData.apr) || 0;
+        const usdValue = parseFloat(tropykusData.usd_value) || 0;
+        
+        const protocolLogo = this.getProtocolLogo('Tropykus');
+        const protocolLink = this.getProtocolLink('Tropykus');
+        
+        card.innerHTML = `
+            <div class="grid grid-cols-5 gap-4 items-center">
+                <div class="flex items-center space-x-3">
+                    <div class="token-icon flex items-center justify-center">
+                        ${protocolLogo}
+                    </div>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="font-semibold text-gray-800">${protocol}</span>
+                            <span class="cursor-pointer text-sm hover:text-blue-600 transition-colors" onclick="window.open('${protocolLink}', '_blank')" title="Visit Tropykus">🔗</span>
+                        </div>
+                        <div class="text-sm text-gray-600">${underlyingTokenSymbol}</div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <div class="text-sm text-gray-500">Holdings</div>
+                    <div class="font-semibold text-gray-800">${this.formatPrice(balance)}</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-sm text-gray-500">Price</div>
+                    <div class="font-semibold text-gray-800">$${this.formatPrice(price)}</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-sm text-gray-500">APR</div>
+                    <div class="font-semibold text-gray-800">${apr.toFixed(2)}%</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-sm text-gray-500">USD Value</div>
+                    <div class="font-semibold text-gray-800">$${this.formatUSDValue(usdValue)}</div>
+                </div>
+            </div>
+        `;
+        
+        return card;
+    }
+
     createYieldTokenCard(yieldTokenData) {
         const card = document.createElement('div');
         card.className = 'bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg shadow-md p-4 card-hover border-l-4 border-yellow-500 cursor-pointer';
@@ -752,6 +838,8 @@ class IBITracker {
                 return `<img src="assets/logos/LayerBank.svg" alt="LayerBank" class="protocol-logo">`;
             case 'avalon':
                 return `<img src="assets/logos/ICON_light BG.png" alt="Avalon" class="protocol-logo">`;
+            case 'tropykus':
+                return `<img src="assets/logos/tropykus.jpg" alt="Tropykus" class="protocol-logo">`;
             default:
                 return `<i class="fas fa-chart-line text-white text-sm"></i>`;
         }
@@ -769,6 +857,8 @@ class IBITracker {
                 return 'https://app.layerbank.finance/bank?chain=rootstock';
             case 'avalon':
                 return 'https://avalon.finance/';
+            case 'tropykus':
+                return 'https://tropykus.com/';
             default:
                 return '#';
         }
