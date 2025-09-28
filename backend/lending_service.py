@@ -85,6 +85,8 @@ class TropykusModule(ProtocolModule):
             return {"error": "Script timeout"}
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON decode error: {e}")
+            self.logger.error(f"Script stdout: {result.stdout}")
+            self.logger.error(f"Script stderr: {result.stderr}")
             return {"error": f"JSON decode error: {e}"}
         except Exception as e:
             self.logger.error(f"Error running Node.js script: {e}")
