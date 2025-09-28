@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@tropykus/tropykus-js": "^0.0.9"
+    "@tropykus/tropykus-js": "^0.0.9",
+    "ethers": "^5.7.2"
   }
 }
