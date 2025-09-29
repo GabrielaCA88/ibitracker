@@ -139,9 +139,6 @@ def get_native_rbtc_balance(address):
     except Exception as e:
         return None
 
-# NFT valuations endpoint removed - now handled by /api/address-info/<address>
-
-# Merkle rewards endpoint removed - now handled by /api/address-info/<address>
 
 @app.route("/api/address-info/<address>")
 def get_address_info(address: str):
@@ -178,9 +175,12 @@ def get_address_info(address: str):
         # Get native rBTC balance from Explorer
         native_rbtc = get_native_rbtc_balance(address)
         
-        # Process and format the data for response (include all tokens)
+        # Process and format the data for response (exclude ERC-721 tokens to avoid duplication with NFT service)
         all_balances = []
         for item in data:
+            # Skip ERC-721 tokens as they are handled by the NFT service
+            if item.get("token", {}).get("type") == "ERC-721":
+                continue
             token_balance = TokenBalance(item)
             all_balances.append(token_balance.to_dict())
         
