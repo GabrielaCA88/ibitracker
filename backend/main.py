@@ -9,10 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from dotenv import load_dotenv
 import logging
-from nft_service import NFTService
-from merkle_rewards_service import MerkleRewardsService
-from yield_token_service import YieldTokenService
-from lending_service import LendingService
+from router_service import RouterService
 
 load_dotenv()
 
@@ -23,11 +20,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
 
-# Initialize services
-nft_service = NFTService()
-merkle_service = MerkleRewardsService()
-yield_service = YieldTokenService()
-lending_service = LendingService()
+# Initialize router service
+router_service = RouterService()
 
 # Rootstock APIs
 ROOTSTOCK_API_BASE = "https://rootstock.blockscout.com/api/v2"
@@ -145,36 +139,9 @@ def get_native_rbtc_balance(address):
     except Exception as e:
         return None
 
-@app.route("/api/nft-valuations/<address>")
-def get_nft_valuations(address: str):
-    """
-    Get NFT valuations for a given address
-    """
-    try:
-        valuations = nft_service.get_address_nft_valuations(address)
-        
-        return jsonify({
-            "address": address,
-            "nft_valuations": valuations,
-            "total_nfts": len(valuations),
-            "total_value_usd": sum(v["total_value_usd"] for v in valuations)
-        })
-        
-    except Exception as e:
-        return jsonify({"error": f"Error fetching NFT valuations: {str(e)}"}), 500
+# NFT valuations endpoint removed - now handled by /api/address-info/<address>
 
-@app.route("/api/merkle-rewards/<address>")
-def get_merkle_rewards(address: str):
-    """
-    Get Merkle rewards for a given address
-    """
-    try:
-        rewards_summary = merkle_service.get_address_rewards_summary(address)
-        
-        return jsonify(rewards_summary)
-        
-    except Exception as e:
-        return jsonify({"error": f"Error fetching Merkle rewards: {str(e)}"}), 500
+# Merkle rewards endpoint removed - now handled by /api/address-info/<address>
 
 @app.route("/api/address-info/<address>")
 def get_address_info(address: str):
@@ -182,25 +149,40 @@ def get_address_info(address: str):
     Get basic address information and token balances
     """
     try:
-        # Get token balances from Blockscout
-        token_balances_response = get_token_balances(address)
+        # Get token balances directly from Blockscout API
+        url = f"{ROOTSTOCK_API_BASE}/addresses/{address}/token-balances"
+        response = requests.get(url, timeout=10)
         
-        if isinstance(token_balances_response, tuple):
-            # If there was an error, return it
-            return token_balances_response
+        if response.status_code != 200:
+            return jsonify({
+                "error": f"Failed to fetch token balances: {response.text}"
+            }), response.status_code
         
-        # Extract the JSON data from the response
-        token_balances_data = token_balances_response.get_json()
-        all_balances = token_balances_data["token_balances"].copy()
+        data = response.json()
+        
+        # Pre-process data for router service (expects list of dicts with token and value keys)
+        router_balances = []
+        for item in data:
+            router_balances.append({
+                "token": {
+                    "type": item.get("token", {}).get("type"),
+                    "symbol": item.get("token", {}).get("symbol"),
+                    "name": item.get("token", {}).get("name")
+                },
+                "value": item.get("value", "0")
+            })
+        
+        # Process through router service (optimized - only runs needed services)
+        results = router_service.process_address(address, router_balances)
         
         # Get native rBTC balance from Explorer
         native_rbtc = get_native_rbtc_balance(address)
         
-        # Get NFT valuations
-        nft_valuations = nft_service.get_address_nft_valuations(address)
-        
-        # Get Merkle rewards
-        merkle_rewards = merkle_service.get_address_rewards_summary(address)
+        # Process and format the data for response (include all tokens)
+        all_balances = []
+        for item in data:
+            token_balance = TokenBalance(item)
+            all_balances.append(token_balance.to_dict())
         
         if native_rbtc:
             # Add native rBTC to the beginning of the list
@@ -271,64 +253,26 @@ def get_address_info(address: str):
             "total_value_usd": len(all_balances),  # Placeholder
             "token_count": len(all_balances),
             "token_balances": all_balances,
-            "nft_valuations": nft_valuations,
-            "nft_count": len(nft_valuations),
-            "nft_total_value_usd": sum(v["total_value_usd"] for v in nft_valuations),
-            "merkle_rewards": merkle_rewards["rewards"],
-            "merkle_rewards_count": merkle_rewards["total_rewards"],
-            "merkle_rewards_total_usd": merkle_rewards["total_usd_value"],
-            "yield_tokens": yield_service.get_yield_token_data(address)["yield_tokens"],
-            "yield_tokens_count": yield_service.get_yield_token_data(address)["total_yield_tokens"]
+            "nft_valuations": results["nft_valuations"],
+            "nft_count": len(results["nft_valuations"]),
+            "nft_total_value_usd": sum(v["total_value_usd"] for v in results["nft_valuations"]),
+            "merkle_rewards": results["merkle_rewards"]["rewards"],
+            "merkle_rewards_count": results["merkle_rewards"]["total_rewards"],
+            "merkle_rewards_total_usd": results["merkle_rewards"]["total_usd_value"],
+            "yield_tokens": results["yield_tokens"]["yield_tokens"],
+            "yield_tokens_count": results["yield_tokens"]["total_yield_tokens"],
+            "lending_portfolio": results["lending_portfolio"],
+            "evidence": results["evidence"]  # Include evidence for debugging
         })
         
     except Exception as e:
         return jsonify({"error": f"Error fetching address info: {str(e)}"}), 500
 
-@app.route("/api/yield-tokens/<address>")
-def get_yield_tokens(address: str):
-    try:
-        yield_data = yield_service.get_yield_token_data(address)
-        return jsonify(yield_data)
-    except Exception as e:
-        return jsonify({"error": f"Error fetching yield tokens: {str(e)}"}), 500
+# Yield tokens endpoint removed - now handled by /api/address-info/<address>
 
-@app.route("/api/lending-data/<address>")
-def get_lending_data(address: str):
-    """
-    Get lending protocol data (APR and prices) for an address
-    """
-    try:
-        # Get lending data directly from the service (it will handle campaign ID extraction)
-        lending_data = lending_service.get_lending_data_for_address(address)
-        
-        return jsonify({
-            "address": address,
-            "lending_data": lending_data
-        })
-        
-    except Exception as e:
-        return jsonify({"error": f"Error fetching lending data: {str(e)}"}), 500
+# Lending data endpoint removed - now handled by /api/address-info/<address>
 
-@app.route("/api/tropykus-portfolio/<address>")
-def get_tropykus_portfolio(address: str):
-    """
-    Get Tropykus portfolio data for an address
-    """
-    try:
-        # Get Tropykus portfolio data
-        tropykus_module = lending_service.protocols.get("tropykus")
-        if not tropykus_module:
-            return jsonify({"error": "Tropykus module not available"}), 500
-        
-        portfolio_data = lending_service.get_tropykus_portfolio_data(address)
-        
-        return jsonify({
-            "address": address,
-            "tropykus_portfolio": portfolio_data
-        })
-        
-    except Exception as e:
-        return jsonify({"error": f"Error fetching Tropykus portfolio data: {str(e)}"}), 500
+# Tropykus portfolio endpoint removed - now handled by /api/address-info/<address>
 
 @app.route("/api/export-excel/<address>")
 def export_to_excel(address: str):
@@ -352,10 +296,11 @@ def export_to_excel(address: str):
                 continue
             token_balances.append(TokenBalance(item).to_dict())
         
-        # Get additional data
-        nft_valuations = nft_service.get_address_nft_valuations(address)
-        merkle_rewards = merkle_service.get_address_rewards_summary(address)
-        yield_tokens = yield_service.get_yield_token_data(address)
+        # Get additional data through router service
+        results = router_service.process_address(address, token_balances)
+        nft_valuations = results["nft_valuations"]
+        merkle_rewards = results["merkle_rewards"]
+        yield_tokens = results["yield_tokens"]
         
         # Create Excel workbook
         wb = Workbook()

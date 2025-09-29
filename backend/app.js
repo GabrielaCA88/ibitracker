@@ -61,11 +61,8 @@ class IBITracker {
 
         try {
             // Fetch main address data, lending data, and Tropykus portfolio data in parallel
-            const [addressResponse, lendingResponse, tropykusResponse] = await Promise.all([
-                fetch(`${this.apiBaseUrl}/api/address-info/${address}`),
-                fetch(`${this.apiBaseUrl}/api/lending-data/${address}`),
-                fetch(`${this.apiBaseUrl}/api/tropykus-portfolio/${address}`)
-            ]);
+            // Fetch address info (now includes all data via router service)
+            const addressResponse = await fetch(`${this.apiBaseUrl}/api/address-info/${address}`);
             
             if (!addressResponse.ok) {
                 const errorData = await addressResponse.json();
@@ -73,24 +70,15 @@ class IBITracker {
             }
 
             const data = await addressResponse.json();
-            let lendingData = null;
-            let tropykusData = null;
             
-            // Handle lending data response (it might fail for some addresses)
-            if (lendingResponse.ok) {
-                const lendingResponseData = await lendingResponse.json();
-                lendingData = lendingResponseData.lending_data;
-            } else {
-                console.warn('Failed to fetch lending data, continuing without it');
-            }
+            // Extract lending portfolio data from the unified response
+            const lendingPortfolio = data.lending_portfolio || {
+                layerbank: { campaign_breakdowns: {} },
+                tropykus: { portfolio_items: [], total_items: 0 }
+            };
             
-            // Handle Tropykus portfolio data response (it might fail for some addresses)
-            if (tropykusResponse.ok) {
-                const tropykusResponseData = await tropykusResponse.json();
-                tropykusData = tropykusResponseData.tropykus_portfolio;
-            } else {
-                console.warn('Failed to fetch Tropykus portfolio data, continuing without it');
-            }
+            const lendingData = lendingPortfolio.layerbank;
+            const tropykusData = lendingPortfolio.tropykus;
 
             this.displayAddressInfo(data);
             this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData, tropykusData);
@@ -354,14 +342,15 @@ class IBITracker {
             line.className = 'grid grid-cols-5 gap-4 items-center py-3 px-4 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors token-line';
             line.setAttribute('data-token-address', token.address_hash || '');
             
-            const balance = this.formatTokenBalance(value, token.decimals);
+            const balance = this.formatTokenBalance(value, token.decimals, token.type);
             const symbol = token.symbol || 'Unknown';
             const name = token.name || 'Unknown Token';
             const iconUrl = token.icon_url;
             const price = token.exchange_rate;
             
             // Calculate USD value
-            const balanceNum = parseFloat(value) / Math.pow(10, parseInt(token.decimals) || 18);
+            // For native rBTC, the value is already in rBTC (not wei), so don't divide by decimals
+            const balanceNum = token.type === 'native' ? parseFloat(value) : parseFloat(value) / Math.pow(10, parseInt(token.decimals) || 18);
             const priceNum = price ? parseFloat(price) : 0;
             const usdValue = balanceNum * priceNum;
             
@@ -409,10 +398,10 @@ class IBITracker {
         }
     }
 
-    formatTokenBalance(value, decimals) {
+    formatTokenBalance(value, decimals, tokenType = null) {
         const numValue = parseFloat(value);
-        const divisor = Math.pow(10, parseInt(decimals) || 18);
-        const balance = numValue / divisor;
+        // For native rBTC, the value is already in rBTC (not wei), so don't divide by decimals
+        const balance = tokenType === 'native' ? numValue : numValue / Math.pow(10, parseInt(decimals) || 18);
         
         if (balance >= 1000000) {
             return (balance / 1000000).toFixed(2) + 'M';
@@ -564,7 +553,7 @@ class IBITracker {
         const card = document.createElement('div');
         card.className = 'bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-md p-4 card-hover border-l-4 border-blue-500';
         
-        const balance = this.formatTokenBalance(value, token.decimals);
+        const balance = this.formatTokenBalance(value, token.decimals, token.type);
         const symbol = token.symbol || 'Unknown';
         const name = token.name || 'Unknown Token';
         const iconUrl = token.icon_url;
