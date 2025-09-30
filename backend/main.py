@@ -9,6 +9,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from dotenv import load_dotenv
 import logging
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from router_service import RouterService
 
 load_dotenv()
@@ -36,16 +39,13 @@ class TokenBalance:
         return {
             "token": {
                 "address_hash": self.token.get("address_hash"),
-                "circulating_market_cap": self.token.get("circulating_market_cap"),
                 "decimals": self.token.get("decimals"),
                 "exchange_rate": self.token.get("exchange_rate"),
-                "holders_count": self.token.get("holders_count"),
                 "icon_url": self.token.get("icon_url"),
                 "name": self.token.get("name"),
                 "symbol": self.token.get("symbol"),
                 "total_supply": self.token.get("total_supply"),
                 "type": self.token.get("type"),
-                "volume_24h": self.token.get("volume_24h"),
             },
             "token_id": self.token.get("token_id"),
             "token_instance": self.token.get("token_instance"),
@@ -164,7 +164,8 @@ def get_address_info(address: str):
                 "token": {
                     "type": item.get("token", {}).get("type"),
                     "symbol": item.get("token", {}).get("symbol"),
-                    "name": item.get("token", {}).get("name")
+                    "name": item.get("token", {}).get("name"),
+                    "address_hash": item.get("token", {}).get("address_hash")
                 },
                 "value": item.get("value", "0")
             })
@@ -189,14 +190,11 @@ def get_address_info(address: str):
             native_token_data = {
                 "token": {
                     "address_hash": "0x0000000000000000000000000000000000000000",  # Native token address
-                    "circulating_market_cap": "0.0",
-                    "decimals": "18",
+                    "decimals": "0",  # Native rBTC balance is already in decimal format
                     "exchange_rate": None,  # Will be set from RBTC price
-                    "holders_count": None,
                     "icon_url": "https://assets.coingecko.com/coins/images/5070/small/RBTC-logo.png?1718152038",
                     "name": "Rootstock Smart Bitcoin",
                     "symbol": "rBTC",
-                    "total_supply": None,
                     "type": "native",
                     "volume_24h": None
                 },

@@ -81,7 +81,7 @@ class IBITracker {
             const tropykusData = lendingPortfolio.tropykus;
 
             this.displayAddressInfo(data);
-            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData, tropykusData);
+            this.displayTokenBalances(data.token_balances, data.nft_valuations, data.merkle_rewards, data.yield_tokens, lendingData, tropykusData, data);
 
         } catch (error) {
             console.error('Error loading address data:', error);
@@ -139,7 +139,7 @@ class IBITracker {
         }
     }
 
-    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null, tropykusData = null) {
+    displayTokenBalances(tokenBalances, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null, tropykusData = null, data = null) {
         const tokenList = document.getElementById('tokenList');
         const portfolioList = document.getElementById('portfolioList');
         tokenList.innerHTML = '';
@@ -150,18 +150,17 @@ class IBITracker {
             return;
         }
 
-        // Separate yield tokens from regular tokens
-        const { yieldTokens: regularYieldTokens, regularTokens } = this.separateTokens(tokenBalances);
+        // Use RouterService evidence to determine which tokens to show in portfolio
+        const evidence = data ? data.evidence || {} : {};
+        const combinedYieldTokens = this.combineTokensWithServiceData(tokenBalances, yieldTokensData, lendingData, evidence);
 
-        // Combine Midas data: merge Blockscout balance with yield token service data
-        const combinedYieldTokens = this.combineMidasData(regularYieldTokens, yieldTokensData, lendingData);
+        // Get wallet tokens (excluding those used by services)
+        const walletTokens = this.getWalletTokens(tokenBalances, combinedYieldTokens, nftValuations, merkleRewards, tropykusData);
 
         // Calculate values including NFTs, Merkle rewards, yield tokens, and Tropykus
-        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, regularTokens, nftValuations, merkleRewards, yieldTokensData, lendingData, tropykusData);
-
-        // Display regular tokens in Wallet
-        if (regularTokens.length > 0) {
-            regularTokens.forEach(tokenData => {
+        this.calculateAndDisplayValues(tokenBalances, combinedYieldTokens, walletTokens, nftValuations, merkleRewards, yieldTokensData, lendingData, tropykusData);
+        if (walletTokens.length > 0) {
+            walletTokens.forEach(tokenData => {
                 const tokenCard = this.createTokenCard(tokenData);
                 tokenList.appendChild(tokenCard);
             });
@@ -170,7 +169,7 @@ class IBITracker {
 
         // Display yield tokens in Portfolio
         if (combinedYieldTokens.length > 0) {
-            combinedYieldTokens.forEach(tokenData => {
+            combinedYieldTokens.forEach((tokenData, index) => {
                 const portfolioCard = this.createPortfolioCard(tokenData);
                 portfolioList.appendChild(portfolioCard);
             });
@@ -207,9 +206,9 @@ class IBITracker {
     }
 
     calculateAndDisplayValues(allTokens, yieldTokens, regularTokens, nftValuations = [], merkleRewards = [], yieldTokensData = [], lendingData = null, tropykusData = null) {
-        // Calculate total tokens (ERC-20s only, excluding native rBTC)
-        const erc20Tokens = allTokens.filter(token => token.token.type !== 'native');
-        const totalTokens = erc20Tokens.length;
+        
+        // Calculate total tokens (including native rBTC)
+        const totalTokens = allTokens.length;
         
         // Calculate total value (sum of all tokens with prices)
         let totalValue = 0;
@@ -217,20 +216,24 @@ class IBITracker {
         let idleValue = 0;
         
         allTokens.forEach(tokenData => {
-            const balance = parseFloat(tokenData.value) / Math.pow(10, parseInt(tokenData.token.decimals) || 18);
+            // For native tokens with decimals=0, use the value directly
+            // For other tokens, divide by 10^decimals
+            let balance;
+            if (tokenData.token.type === 'native' && tokenData.token.decimals === '0') {
+                balance = parseFloat(tokenData.value);
+            } else {
+                balance = parseFloat(tokenData.value) / Math.pow(10, parseInt(tokenData.token.decimals) || 18);
+            }
+            
             const price = tokenData.token.exchange_rate ? parseFloat(tokenData.token.exchange_rate) : 0;
             const tokenValue = balance * price;
+            
             
             if (tokenValue > 0) {
                 totalValue += tokenValue;
                 
-                // Check if it's a yield token
-                const isYieldToken = yieldTokens.some(yt => yt.token.address_hash === tokenData.token.address_hash);
-                if (isYieldToken) {
-                    productiveValue += tokenValue;
-                } else {
-                    idleValue += tokenValue;
-                }
+                // All tokens are considered idle unless they have service data
+                idleValue += tokenValue;
             }
         });
 
@@ -276,40 +279,43 @@ class IBITracker {
             for (const protocolName in lendingData.protocols) {
                 const protocol = lendingData.protocols[protocolName];
                 
-                // Check APR data from campaign_breakdowns
-                if (protocol.apr && protocol.apr.campaign_breakdowns) {
-                    for (const campaignId in protocol.apr.campaign_breakdowns) {
-                        const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
-                        
-                        // Ensure breakdowns is an array before calling forEach
-                        if (Array.isArray(breakdowns)) {
-                            breakdowns.forEach(breakdown => {
-                            if (breakdown.explorer_address && breakdown.action) {
-                                // Find the corresponding token balance
-                                const matchingToken = allTokens.find(token => 
-                                    token.token.address_hash && 
-                                    token.token.address_hash.toLowerCase() === breakdown.explorer_address.toLowerCase()
-                                );
+                // Check APR data from portfolio_entries (new structure)
+                if (protocol.apr && protocol.apr.portfolio_entries) {
+                    protocol.apr.portfolio_entries.forEach(entry => {
+                        if (entry.explorer_address) {
+                            // Find the corresponding token balance
+                            const matchingToken = allTokens.find(token => 
+                                token.token.address_hash && 
+                                token.token.address_hash.toLowerCase() === entry.explorer_address.toLowerCase()
+                            );
+                            
+                            if (matchingToken) {
+                                const balance = parseFloat(matchingToken.value) / Math.pow(10, parseInt(matchingToken.token.decimals) || 18);
                                 
-                                if (matchingToken) {
-                                    const balance = parseFloat(matchingToken.value) / Math.pow(10, parseInt(matchingToken.token.decimals) || 18);
-                                    const price = breakdown.price || 0;
-                                    const tokenValue = balance * price;
-                                    
-                                    if (tokenValue > 0) {
-                                        if (breakdown.action === 'LEND') {
-                                            // Add LEND positions to productive value
-                                            productiveValue += tokenValue;
-                                        } else if (breakdown.action === 'BORROW') {
-                                            // Subtract BORROW positions from productive value
-                                            productiveValue -= tokenValue;
-                                        }
+                                // Get price from protocol.price.token_prices
+                                let price = 0;
+                                if (protocol.price && protocol.price.token_prices) {
+                                    const priceData = protocol.price.token_prices[entry.explorer_address.toLowerCase()];
+                                    if (priceData) {
+                                        price = priceData.price || 0;
+                                    }
+                                }
+                                
+                                const tokenValue = balance * price;
+                                
+                                if (tokenValue > 0) {
+                                    // Check if this is a BORROW position (negative APR)
+                                    if (entry.total_apr < 0) {
+                                        // BORROW position - subtract from productive value
+                                        productiveValue -= tokenValue;
+                                    } else {
+                                        // LEND position - add to productive value
+                                        productiveValue += tokenValue;
                                     }
                                 }
                             }
-                        });
                         }
-                    }
+                    });
                 }
             }
         }
@@ -437,112 +443,123 @@ class IBITracker {
         }
     }
 
-    separateTokens(tokenBalances) {
-        const yieldKeywords = ['Midas', 'LayerBank', 'Avalon'];
-        const uniswapNftContracts = [
-            '0x0389879e0156033202c44bf784ac18fc02edee4f',
-            '0x19b683a2f45012318d9b2ae1280d68d3ec54d663',
-            '0x9d9386c042f194b460ec424a1e57acde25f5c4b1'
-        ];
-        const yieldTokens = [];
-        const regularTokens = [];
 
-        tokenBalances.forEach(tokenData => {
-            const tokenName = tokenData.token.name || '';
-            const tokenSymbol = tokenData.token.symbol || '';
-            const tokenAddress = tokenData.token.address_hash || '';
-            
-            // Check if token is a yield-generating token by name/symbol
-            const isYieldTokenByName = yieldKeywords.some(keyword => 
-                tokenName.toLowerCase().includes(keyword.toLowerCase()) ||
-                tokenSymbol.toLowerCase().includes(keyword.toLowerCase())
-            );
-            
-            // Check if token is a Uniswap NFT by contract address
-            const isUniswapNft = uniswapNftContracts.some(contract => 
-                tokenAddress.toLowerCase() === contract.toLowerCase()
-            );
-
-            if (isYieldTokenByName || isUniswapNft) {
-                yieldTokens.push(tokenData);
-            } else {
-                regularTokens.push(tokenData);
+    getWalletTokens(tokenBalances, combinedYieldTokens, nftValuations, merkleRewards, tropykusData) {
+        // Get addresses of tokens that are used by services (should not appear in wallet)
+        const serviceTokenAddresses = new Set();
+        
+        // Add yield token addresses
+        combinedYieldTokens.forEach(token => {
+            if (token.token.address_hash) {
+                serviceTokenAddresses.add(token.token.address_hash.toLowerCase());
             }
         });
-
-        return { yieldTokens, regularTokens };
+        
+        // Add NFT addresses (if any are ERC-20 tokens)
+        nftValuations.forEach(nft => {
+            if (nft.token_address) {
+                serviceTokenAddresses.add(nft.token_address.toLowerCase());
+            }
+        });
+        
+        // Add Merkle reward token addresses
+        merkleRewards.forEach(reward => {
+            if (reward.token_address) {
+                serviceTokenAddresses.add(reward.token_address.toLowerCase());
+            }
+        });
+        
+        // Add Tropykus token addresses
+        if (tropykusData && tropykusData.portfolio_items) {
+            tropykusData.portfolio_items.forEach(item => {
+                if (item.token_address) {
+                    serviceTokenAddresses.add(item.token_address.toLowerCase());
+                }
+            });
+        }
+        
+        // Filter out tokens that are used by services
+        return tokenBalances.filter(tokenData => {
+            const tokenAddress = tokenData.token.address_hash;
+            if (!tokenAddress) return true; // Keep tokens without addresses (like native rBTC)
+            
+            return !serviceTokenAddresses.has(tokenAddress.toLowerCase());
+        });
     }
 
-    combineMidasData(regularYieldTokens, yieldTokensData, lendingData = null) {
+    combineTokensWithServiceData(tokenBalances, yieldTokensData, lendingData = null, evidence = {}) {
         const combinedTokens = [];
         
-        console.log('=== COMBINE MIDAS DATA DEBUG ===');
-        console.log('regularYieldTokens:', regularYieldTokens.map(t => ({ name: t.token.name, address: t.token.address_hash })));
-        console.log('lendingData:', lendingData);
-        
-        regularYieldTokens.forEach(tokenData => {
-            const tokenAddress = tokenData.token.address_hash || '';
-            
-            // Check if this is a Midas token that has yield data
-            const matchingYieldData = yieldTokensData.find(yieldData => 
-                yieldData.token_address.toLowerCase() === tokenAddress.toLowerCase()
-            );
-            
-            // Check if this token has lending data (APR and price from lending service)
-            let lendingApr = null;
-            let lendingPrice = null;
-            
-            if (lendingData && lendingData.protocols) {
-                // Look through all protocols for matching explorer_address
-                for (const protocolName in lendingData.protocols) {
-                    const protocol = lendingData.protocols[protocolName];
-                    
-                    // Check APR data from campaign_breakdowns
-                    if (protocol.apr && protocol.apr.campaign_breakdowns) {
-                        for (const campaignId in protocol.apr.campaign_breakdowns) {
-                            const breakdowns = protocol.apr.campaign_breakdowns[campaignId];
-                            // Ensure breakdowns is an array before calling find
-                            if (Array.isArray(breakdowns)) {
-                                const matchingAprData = breakdowns.find(breakdown => 
-                                    breakdown.explorer_address && 
-                                    breakdown.explorer_address.toLowerCase() === tokenAddress.toLowerCase()
-                                );
-                                if (matchingAprData) {
-                                    lendingApr = matchingAprData.total_apr;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Check price data - now keyed by explorer_address
-                    if (protocol.price && protocol.price.token_prices) {
-                        // Direct lookup by explorer_address (tokenAddress)
-                        const priceData = protocol.price.token_prices[tokenAddress.toLowerCase()];
-                        if (priceData) {
-                            lendingPrice = priceData.price;
-                        }
-                    }
-                }
-            }
-            
-            if (matchingYieldData || lendingApr !== null || lendingPrice !== null) {
-                // Combine Blockscout data with yield service data and lending data
-                // Prioritize yield token APR over lending APR for yield tokens
+        // Process yield token portfolio entries directly
+        if (yieldTokensData && yieldTokensData.length > 0) {
+            yieldTokensData.forEach(yieldEntry => {
+                // Find the corresponding token balance for additional data
+                const matchingTokenBalance = tokenBalances.find(tokenData => 
+                    tokenData.token.address_hash && 
+                    tokenData.token.address_hash.toLowerCase() === yieldEntry.token_address.toLowerCase()
+                );
+                
                 const combinedToken = {
-                    ...tokenData,
+                    token: matchingTokenBalance ? matchingTokenBalance.token : {
+                        address_hash: yieldEntry.token_address,
+                        symbol: yieldEntry.symbol || 'Unknown',
+                        name: yieldEntry.name || 'Unknown Token',
+                        decimals: yieldEntry.decimals || '18',
+                        type: 'ERC-20'
+                    },
+                    value: matchingTokenBalance ? matchingTokenBalance.value : '0',
                     yieldData: {
-                        price: lendingPrice || (matchingYieldData ? matchingYieldData.price : null),
-                        apr: (matchingYieldData ? matchingYieldData.apr : null) || lendingApr,
-                        protocol: matchingYieldData ? matchingYieldData.protocol : this.getProtocol(tokenData.token)
+                        price: yieldEntry.price,
+                        apr: yieldEntry.apr,
+                        protocol: yieldEntry.protocol || 'Yield Protocol'
                     }
                 };
                 combinedTokens.push(combinedToken);
-            } else {
-                // Keep regular yield tokens without yield service data
-                combinedTokens.push(tokenData);
+            });
+        }
+        
+        // Process lending portfolio entries directly
+        if (lendingData && lendingData.protocols) {
+            for (const protocolName in lendingData.protocols) {
+                const protocol = lendingData.protocols[protocolName];
+                
+                if (protocol.apr && protocol.apr.portfolio_entries) {
+                    protocol.apr.portfolio_entries.forEach(entry => {
+                        // Find the corresponding token balance for additional data
+                        const matchingTokenBalance = tokenBalances.find(tokenData => 
+                            tokenData.token.address_hash && 
+                            tokenData.token.address_hash.toLowerCase() === entry.explorer_address.toLowerCase()
+                        );
+                        
+                        // Get price from lending service
+                        let price = null;
+                        if (protocol.price && protocol.price.token_prices) {
+                            const priceData = protocol.price.token_prices[entry.explorer_address.toLowerCase()];
+                            if (priceData) {
+                                price = priceData.price;
+                            }
+                        }
+                        
+                        const combinedToken = {
+                            token: matchingTokenBalance ? matchingTokenBalance.token : {
+                                address_hash: entry.explorer_address,
+                                symbol: 'Unknown',
+                                name: `${protocolName} Token`,
+                                decimals: '18',
+                                type: 'ERC-20'
+                            },
+                            value: matchingTokenBalance ? matchingTokenBalance.value : '0',
+                            yieldData: {
+                                price: price,
+                                apr: entry.total_apr,
+                                protocol: protocolName
+                            }
+                        };
+                        combinedTokens.push(combinedToken);
+                    });
+                }
             }
-        });
+        }
         
         return combinedTokens;
     }
@@ -854,49 +871,13 @@ class IBITracker {
     }
 
     getNFTProtocol(nftData) {
-        const tokenName = nftData.token_name || '';
-        const tokenSymbol = nftData.token_symbol || '';
-        
-        if (tokenName.toLowerCase().includes('uniswap') || tokenSymbol.toLowerCase().includes('uni')) {
-            return 'Uniswap';
-        } else if (tokenName.toLowerCase().includes('midas') || tokenSymbol.toLowerCase().includes('midas')) {
-            return 'Midas';
-        } else if (tokenName.toLowerCase().includes('layerbank') || tokenSymbol.toLowerCase().includes('layerbank')) {
-            return 'LayerBank';
-        } else if (tokenName.toLowerCase().includes('avalon') || tokenSymbol.toLowerCase().includes('avalon')) {
-            return 'Avalon';
-        } else {
-            return 'NFT Protocol';
-        }
+        // Use protocol from NFT data if available, otherwise default
+        return nftData.protocol || 'NFT Protocol';
     }
 
     getProtocol(token) {
-        const tokenName = token.name || '';
-        const tokenSymbol = token.symbol || '';
-        const tokenAddress = token.address_hash || '';
-        
-        const uniswapNftContracts = [
-            '0x0389879e0156033202c44bf784ac18fc02edee4f',
-            '0x19b683a2f45012318d9b2ae1280d68d3ec54d663',
-            '0x9d9386c042f194b460ec424a1e57acde25f5c4b1'
-        ];
-        
-        // Check if it's a Uniswap NFT by contract address
-        const isUniswapNft = uniswapNftContracts.some(contract => 
-            tokenAddress.toLowerCase() === contract.toLowerCase()
-        );
-        
-        if (isUniswapNft) {
-            return 'Uniswap';
-        } else if (tokenName.toLowerCase().includes('midas') || tokenSymbol.toLowerCase().includes('midas')) {
-            return 'Midas';
-        } else if (tokenName.toLowerCase().includes('layerbank') || tokenSymbol.toLowerCase().includes('layerbank')) {
-            return 'LayerBank';
-        } else if (tokenName.toLowerCase().includes('avalon') || tokenSymbol.toLowerCase().includes('avalon')) {
-            return 'Avalon';
-        } else {
-            return 'Yield Protocol';
-        }
+        // Use protocol from token data if available, otherwise default
+        return token.protocol || 'Yield Protocol';
     }
 
     getPriceSource(token) {

@@ -6,10 +6,10 @@ Optimizes service calls by gathering evidence first and only running necessary s
 import requests
 import logging
 from typing import Dict, Any, List, Optional
-from nft_service import NFTService
-from merkle_rewards_service import MerkleRewardsService
-from yield_token_service import YieldTokenService
-from lending_service import LendingService
+from backend.nft_service import NFTService
+from backend.merkle_rewards_service import MerkleRewardsService
+from backend.yield_token_service import YieldTokenService
+from backend.lending_service import LendingService
 
 logger = logging.getLogger(__name__)
 
@@ -176,24 +176,29 @@ class RouterService:
                 logger.error(f"Error getting yield data: {str(e)}")
         return {"yield_tokens": [], "total_yield_tokens": 0}
     
-    def get_lending_data(self, address: str) -> Dict[str, Any]:
+    def get_lending_data(self, address: str, token_balances: List[Dict] = None) -> Dict[str, Any]:
         """Get lending data if service is available"""
         if self.lending_service:
             try:
-                data = self.lending_service.get_lending_data_for_address(address)
-                # Ensure the structure has campaign_breakdowns
-                if isinstance(data, dict) and "campaign_breakdowns" not in data:
-                    data["campaign_breakdowns"] = {}
+                logger.info(f"Router service calling lending service with {len(token_balances) if token_balances else 0} token balances")
+                if token_balances:
+                    for i, balance in enumerate(token_balances):
+                        token = balance.get('token', {})
+                        logger.info(f"  Token {i}: {token.get('symbol', 'N/A')} ({token.get('name', 'N/A')}) - {balance.get('value', '0')}")
+                
+                data = self.lending_service.get_lending_data_for_address(address, token_balances)
+                
+                logger.info(f"Router service received lending data from lending service")
                 return data
             except Exception as e:
                 logger.error(f"Error getting lending data: {str(e)}")
-        return {"campaign_breakdowns": {}}
+        return {"portfolio_entries": []}
     
-    def get_tropykus_data(self, address: str) -> Dict[str, Any]:
+    def get_tropykus_data(self, address: str, token_balances: List[Dict] = None) -> Dict[str, Any]:
         """Get Tropykus portfolio data if service is available"""
         if self.lending_service:
             try:
-                return self.lending_service.get_tropykus_portfolio_data(address)
+                return self.lending_service.get_tropykus_portfolio_data(address, token_balances)
             except Exception as e:
                 logger.error(f"Error getting Tropykus data: {str(e)}")
         return {"protocol": "Tropykus", "portfolio_items": [], "total_items": 0}
@@ -224,7 +229,7 @@ class RouterService:
                 "merkle_rewards": {"rewards": [], "total_rewards": 0, "total_usd_value": 0},
                 "yield_tokens": {"yield_tokens": [], "total_yield_tokens": 0},
                 "lending_portfolio": {
-                    "layerbank": {"campaign_breakdowns": {}},
+                    "layerbank": {"portfolio_entries": []},
                     "tropykus": {"protocol": "Tropykus", "portfolio_items": [], "total_items": 0}
                 }
             }
@@ -240,8 +245,10 @@ class RouterService:
                 results["yield_tokens"] = self.get_yield_data(address)
             
             if evidence["has_lending"]:
-                results["lending_portfolio"]["layerbank"] = self.get_lending_data(address)
-                results["lending_portfolio"]["tropykus"] = self.get_tropykus_data(address)
+                # Pass all token balances to lending service - let it handle protocol filtering
+                logger.info(f"Router service process_address: About to call get_lending_data with {len(token_balances)} token balances")
+                results["lending_portfolio"]["layerbank"] = self.get_lending_data(address, token_balances)
+                results["lending_portfolio"]["tropykus"] = self.get_tropykus_data(address, token_balances)
             
             logger.info(f"Successfully processed {address} with evidence: {evidence}")
             return results
@@ -256,7 +263,7 @@ class RouterService:
                 "merkle_rewards": {"rewards": [], "total_rewards": 0, "total_usd_value": 0},
                 "yield_tokens": {"yield_tokens": [], "total_yield_tokens": 0},
                 "lending_portfolio": {
-                    "layerbank": {"campaign_breakdowns": {}},
+                    "layerbank": {"portfolio_entries": []},
                     "tropykus": {"protocol": "Tropykus", "portfolio_items": [], "total_items": 0}
                 }
             }
