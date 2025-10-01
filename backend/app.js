@@ -71,6 +71,9 @@ class IBITracker {
 
             const data = await addressResponse.json();
             
+            // Store the data for Excel export
+            this.currentData = data;
+            
             // Extract lending portfolio data from the unified response
             const lendingPortfolio = data.lending_portfolio || {
                 layerbank: { campaign_breakdowns: {} },
@@ -100,7 +103,7 @@ class IBITracker {
     }
 
     async downloadExcel() {
-        if (!this.currentAddress) {
+        if (!this.currentAddress || !this.currentData) {
             this.showError('No address data available for download');
             return;
         }
@@ -113,16 +116,31 @@ class IBITracker {
             downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
             downloadBtn.disabled = true;
 
-            // Create download link
-            const downloadUrl = `${this.apiBaseUrl}/api/export-excel/${this.currentAddress}`;
+            // Send cached data to backend for Excel generation
+            const response = await fetch(`${this.apiBaseUrl}/api/export-excel`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(this.currentData)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Get the Excel file as blob
+            const blob = await response.blob();
             
-            // Create temporary link element
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.href = downloadUrl;
+            link.href = url;
             link.download = `portfolio_${this.currentAddress.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
 
             // Reset button state
             downloadBtn.innerHTML = originalText;

@@ -272,33 +272,17 @@ def get_address_info(address: str):
 
 # Tropykus portfolio endpoint removed - now handled by /api/address-info/<address>
 
-@app.route("/api/export-excel/<address>")
-def export_to_excel(address: str):
+@app.route("/api/export-excel", methods=['POST'])
+def export_to_excel():
     """
-    Export portfolio data to Excel spreadsheet
+    Export portfolio data to Excel spreadsheet using cached data from frontend
     """
     try:
-        # Get all portfolio data
-        url = f"{ROOTSTOCK_API_BASE}/addresses/{address}/token-balances"
-        response = requests.get(url, timeout=10)
+        # Get data from request body (sent by frontend)
+        data = request.get_json()
         
-        if response.status_code != 200:
-            return jsonify({"error": "Failed to fetch token balances"}), response.status_code
-        
-        data = response.json()
-        
-        # Filter out ERC-721 tokens
-        token_balances = []
-        for item in data:
-            if item.get("token", {}).get("type") == "ERC-721":
-                continue
-            token_balances.append(TokenBalance(item).to_dict())
-        
-        # Get additional data through router service
-        results = router_service.process_address(address, token_balances)
-        nft_valuations = results["nft_valuations"]
-        merkle_rewards = results["merkle_rewards"]
-        yield_tokens = results["yield_tokens"]
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
         
         # Create Excel workbook
         wb = Workbook()
@@ -306,10 +290,10 @@ def export_to_excel(address: str):
         # Remove default sheet
         wb.remove(wb.active)
         
-        # Create sheets
-        create_wallet_sheet(wb, token_balances)
-        create_portfolio_sheet(wb, token_balances, nft_valuations, merkle_rewards, yield_tokens)
-        create_summary_sheet(wb, address, token_balances, nft_valuations, merkle_rewards, yield_tokens)
+        # Create sheets using the same data structure as frontend
+        create_wallet_sheet(wb, data.get("token_balances", []))
+        create_portfolio_sheet(wb, data)
+        create_summary_sheet(wb, data.get("address", "Unknown"), data)
         
         # Save to temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
@@ -318,6 +302,7 @@ def export_to_excel(address: str):
         
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        address = data.get("address", "Unknown")
         filename = f"portfolio_{address[:8]}_{timestamp}.xlsx"
         
         return send_file(
@@ -371,8 +356,8 @@ def create_wallet_sheet(wb, token_balances):
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
 
-def create_portfolio_sheet(wb, token_balances, nft_valuations, merkle_rewards, yield_tokens):
-    """Create Portfolio sheet with yield tokens, NFTs, and rewards"""
+def create_portfolio_sheet(wb, data):
+    """Create Portfolio sheet using the same data structure as frontend"""
     ws = wb.create_sheet("Portfolio")
     
     # Headers
@@ -385,25 +370,71 @@ def create_portfolio_sheet(wb, token_balances, nft_valuations, merkle_rewards, y
     
     row = 2
     
+    # Process all portfolio items from the data structure
+    # This mirrors how the frontend processes the data
+    
     # Yield tokens
-    for token_data in token_balances:
-        token = token_data["token"]
-        if any(keyword in token.get("name", "").lower() for keyword in ["midas", "layerbank", "avalon"]):
-            value = token_data["value"]
-            balance = float(value) / (10 ** int(token.get("decimals", 18)))
-            price = float(token.get("exchange_rate", 0)) if token.get("exchange_rate") else 0
-            usd_value = balance * price
-            
-            ws.cell(row=row, column=1, value="Yield Token")
-            ws.cell(row=row, column=2, value="Midas")  # Default protocol
-            ws.cell(row=row, column=3, value=token.get("name", ""))
-            ws.cell(row=row, column=4, value=round(balance, 8))
-            ws.cell(row=row, column=5, value=f"${price:,.2f}" if price > 0 else "N/A")
-            ws.cell(row=row, column=6, value="N/A")  # APR not available in basic data
-            ws.cell(row=row, column=7, value=f"${usd_value:,.2f}" if usd_value > 0 else "N/A")
-            row += 1
+    yield_tokens = data.get("yield_tokens", [])
+    if isinstance(yield_tokens, dict):
+        yield_tokens = yield_tokens.get("yield_tokens", [])
+    
+    for yield_token in yield_tokens:
+        ws.cell(row=row, column=1, value="Yield Token")
+        ws.cell(row=row, column=2, value=yield_token.get("protocol", "Yield Protocol"))
+        ws.cell(row=row, column=3, value=yield_token.get("name", "Unknown"))
+        ws.cell(row=row, column=4, value=round(float(yield_token.get("balance", 0)), 8))
+        ws.cell(row=row, column=5, value=f"${float(yield_token.get('price', 0)):,.2f}")
+        ws.cell(row=row, column=6, value=f"{float(yield_token.get('apr', 0)):.2f}%")
+        ws.cell(row=row, column=7, value=f"${float(yield_token.get('usd_value', 0)):,.2f}")
+        row += 1
+    
+    # Lending positions - process all protocols generically
+    lending_portfolio = data.get("lending_portfolio", {})
+    for protocol_name, protocol_data in lending_portfolio.items():
+        if isinstance(protocol_data, dict) and "portfolio_items" in protocol_data:
+            # Tropykus format
+            for item in protocol_data["portfolio_items"]:
+                ws.cell(row=row, column=1, value="Lending")
+                ws.cell(row=row, column=2, value=protocol_name.title())
+                ws.cell(row=row, column=3, value=f"{protocol_name.title()} {item.get('underlying_token_name', '')}")
+                ws.cell(row=row, column=4, value=round(float(item.get("balance", 0)), 8))
+                ws.cell(row=row, column=5, value=f"${float(item.get('price', 0)):,.2f}")
+                ws.cell(row=row, column=6, value=f"{float(item.get('apr', 0)):.2f}%")
+                ws.cell(row=row, column=7, value=f"${float(item.get('usd_value', 0)):,.2f}")
+                row += 1
+        elif isinstance(protocol_data, dict) and "protocols" in protocol_data:
+            # LayerBank format
+            for sub_protocol_name, sub_protocol_data in protocol_data["protocols"].items():
+                if "apr" in sub_protocol_data and "portfolio_entries" in sub_protocol_data["apr"]:
+                    for entry in sub_protocol_data["apr"]["portfolio_entries"]:
+                        # Get price from price data
+                        price = 0
+                        if "price" in sub_protocol_data and "token_prices" in sub_protocol_data["price"]:
+                            price_data = sub_protocol_data["price"]["token_prices"].get(entry.get("explorer_address", "").lower(), {})
+                            price = price_data.get("price", 0)
+                        
+                        # Get balance from token balances
+                        balance = 0
+                        token_balances = data.get("token_balances", [])
+                        for token_data in token_balances:
+                            if token_data["token"].get("address_hash", "").lower() == entry.get("explorer_address", "").lower():
+                                balance = float(token_data["value"]) / (10 ** int(token_data["token"].get("decimals", 18)))
+                                break
+                        
+                        usd_value = balance * price
+                        action = "LEND" if entry.get("total_apr", 0) >= 0 else "BORROW"
+                        
+                        ws.cell(row=row, column=1, value="Lending")
+                        ws.cell(row=row, column=2, value=sub_protocol_name.title())
+                        ws.cell(row=row, column=3, value=f"{sub_protocol_name.title()} {action}")
+                        ws.cell(row=row, column=4, value=round(balance, 8))
+                        ws.cell(row=row, column=5, value=f"${price:,.2f}" if price > 0 else "N/A")
+                        ws.cell(row=row, column=6, value=f"{entry.get('total_apr', 0):.2f}%")
+                        ws.cell(row=row, column=7, value=f"${usd_value:,.2f}" if usd_value > 0 else "N/A")
+                        row += 1
     
     # NFTs
+    nft_valuations = data.get("nft_valuations", [])
     for nft_data in nft_valuations:
         ws.cell(row=row, column=1, value="NFT")
         ws.cell(row=row, column=2, value="Uniswap")
@@ -415,7 +446,11 @@ def create_portfolio_sheet(wb, token_balances, nft_valuations, merkle_rewards, y
         row += 1
     
     # Merkle rewards
-    for reward_data in merkle_rewards.get("rewards", []):
+    merkle_rewards = data.get("merkle_rewards", [])
+    if isinstance(merkle_rewards, dict):
+        merkle_rewards = merkle_rewards.get("rewards", [])
+    
+    for reward_data in merkle_rewards:
         ws.cell(row=row, column=1, value="Reward")
         ws.cell(row=row, column=2, value="Merkle")
         ws.cell(row=row, column=3, value=f"Merkle Rewards ({reward_data.get('token', {}).get('symbol', '')})")
@@ -438,7 +473,7 @@ def create_portfolio_sheet(wb, token_balances, nft_valuations, merkle_rewards, y
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
 
-def create_summary_sheet(wb, address, token_balances, nft_valuations, merkle_rewards, yield_tokens):
+def create_summary_sheet(wb, address, data):
     """Create Summary sheet with totals and overview"""
     ws = wb.create_sheet("Summary")
     
@@ -449,6 +484,19 @@ def create_summary_sheet(wb, address, token_balances, nft_valuations, merkle_rew
     # Summary data
     row = 3
     
+    # Extract data from the same structure as frontend
+    token_balances = data.get("token_balances", [])
+    nft_valuations = data.get("nft_valuations", [])
+    merkle_rewards = data.get("merkle_rewards", [])
+    if isinstance(merkle_rewards, dict):
+        merkle_rewards = merkle_rewards.get("rewards", [])
+    
+    yield_tokens = data.get("yield_tokens", [])
+    if isinstance(yield_tokens, dict):
+        yield_tokens = yield_tokens.get("yield_tokens", [])
+    
+    lending_portfolio = data.get("lending_portfolio", {})
+    
     # Calculate totals
     total_tokens = len(token_balances)
     total_value = sum(
@@ -458,8 +506,36 @@ def create_summary_sheet(wb, address, token_balances, nft_valuations, merkle_rew
     )
     nft_count = len(nft_valuations)
     nft_value = sum(float(nft.get("total_value_usd", 0)) for nft in nft_valuations)
-    reward_count = merkle_rewards.get("total_rewards", 0)
-    reward_value = merkle_rewards.get("total_usd_value", 0)
+    reward_count = len(merkle_rewards)
+    reward_value = sum(float(reward.get("usd_value", 0)) for reward in merkle_rewards)
+    
+    # Calculate yield token value
+    yield_value = sum(float(yield_token.get("usd_value", 0)) for yield_token in yield_tokens)
+    
+    # Calculate lending value generically
+    lending_value = 0
+    for protocol_name, protocol_data in lending_portfolio.items():
+        if isinstance(protocol_data, dict) and "portfolio_items" in protocol_data:
+            # Tropykus format
+            lending_value += sum(float(item.get("usd_value", 0)) for item in protocol_data["portfolio_items"])
+        elif isinstance(protocol_data, dict) and "protocols" in protocol_data:
+            # LayerBank format
+            for sub_protocol_name, sub_protocol_data in protocol_data["protocols"].items():
+                if "apr" in sub_protocol_data and "portfolio_entries" in sub_protocol_data["apr"]:
+                    for entry in sub_protocol_data["apr"]["portfolio_entries"]:
+                        # Get price and balance
+                        price = 0
+                        if "price" in sub_protocol_data and "token_prices" in sub_protocol_data["price"]:
+                            price_data = sub_protocol_data["price"]["token_prices"].get(entry.get("explorer_address", "").lower(), {})
+                            price = price_data.get("price", 0)
+                        
+                        balance = 0
+                        for token_data in token_balances:
+                            if token_data["token"].get("address_hash", "").lower() == entry.get("explorer_address", "").lower():
+                                balance = float(token_data["value"]) / (10 ** int(token_data["token"].get("decimals", 18)))
+                                break
+                        
+                        lending_value += balance * price
     
     summary_data = [
         ("Total Tokens", total_tokens),
@@ -468,7 +544,9 @@ def create_summary_sheet(wb, address, token_balances, nft_valuations, merkle_rew
         ("NFT Value", f"${nft_value:,.2f}"),
         ("Reward Count", reward_count),
         ("Reward Value", f"${reward_value:,.2f}"),
-        ("Total Portfolio Value", f"${total_value + nft_value + reward_value:,.2f}"),
+        ("Yield Token Value", f"${yield_value:,.2f}"),
+        ("Lending Value", f"${lending_value:,.2f}"),
+        ("Total Portfolio Value", f"${total_value + nft_value + reward_value + yield_value + lending_value:,.2f}"),
         ("Export Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     ]
     
